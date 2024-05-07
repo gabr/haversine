@@ -1,5 +1,6 @@
 ///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
 const std = @import("std");
+const math = std.math;
 const debug = std.debug;
 
 /// outputs:
@@ -33,4 +34,24 @@ pub fn main() !void {
     //     {"x0":8.1610847750272519,   "y0":-38.2671013246085465, "x1":14.7521018520305667,  "y1":-61.2419556816616790}
     // ]}
 
+}
+
+
+fn square(x: f64) f64 { return math.pow(f64, x, 2); }
+
+// https://en.wikipedia.org/wiki/Haversine_formula
+fn haversine(lon0: f64, lat0: f64, lon1: f64, lat1: f64) f64 {
+    const earth_radius = 6372.8; // that's an averrage
+    const dlat = math.degreesToRadians(lat1 - lat0);
+    const dlon = math.degreesToRadians(lon1 - lon0);
+    const rlat0 = math.degreesToRadians(lat0);
+    const rlat1 = math.degreesToRadians(lat1);
+    const a = square(@sin(dlat/2.0)) + @cos(rlat0) * @cos(rlat1) * square(@sin(dlon/2.0));
+    const c = 2.0*math.asin(math.sqrt(a));
+    return earth_radius * c;
+}
+
+test { // zig test ./generate-data.zig
+    _ = square;
+    _ = haversine;
 }
