@@ -1,23 +1,67 @@
 ///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
-const std = @import("std");
-const math = std.math;
-const debug = std.debug;
+const std    = @import("std");
+const stderr = std.debug.print;
+const assert = std.debug.assert;
+const mem    = std.mem;
+const math   = std.math;
 
-/// outputs:
-/// 1. output-data.json - the JSON output with the latitude and longitude paris
-/// 2. output-data.f64  - binary file with the same floats as in output.json
-/// 3. output-hsin.json - Haversine distance for each pair as a JSON
-/// 4. output-hsin.f64  - Haversine distance for each pair as binary floats
-/// 5. output-info.txt  - general info about generated data,
-///                       parameters provided to the generator,
-///                       amout of data produces, expected Haversine sum etc.
+const help =
+\\generate-data.zig
+\\  A program for generating random latitude and longitude point
+\\  pairs with Haversine distances calculated for each point.
+\\
+\\Usage:
+\\  ./generate-data.zig output name count [seed]
+\\
+\\    output  [string]  Existing location in which output files will be generated.
+\\    name    [string]  Name prefix used for each of the generated output files.
+\\    count   [u64]     Positive numeric value of how many pairs to generate.
+\\    seed    [u64]     Optional positive numeric value used as a seed for randomness.
+\\
+\\As its output program generates files:
+\\
+\\  1. name-data.json - the JSON output with the latitude and longitude pairs
+\\  2. name-data.f64  - binary file with the same floats as in output.json
+\\  3. name-hsin.json - Haversine distance for each pair as a JSON
+\\  4. name-hsin.f64  - Haversine distance for each pair as binary floats
+\\  5. name-info.txt  - summary and general info about the data
+\\
+\\Examples:
+\\  # mkdir data
+\\  # ./generate-data.zig data/ one   1
+\\  # ./generate-data.zig data/ small 10
+\\  # ./generate-data.zig data/ big   100000
+\\  # ./generate-data.zig data/ huge  100000000
+\\  # ./generate-data.zig data/ max   18446744073709551615
+\\  # KNOWN_SEED=13
+\\  # ./generate-data.zig data/ retest 10 $KNOWN_SEED
+\\
+;
+
 pub fn main() !void {
-    var stdout_bw = std.io.bufferedWriter(std.io.getStdOut().writer());
-    defer stdout_bw.flush() catch unreachable;
-    const stdout = stdout_bw.writer();
-    _ = stdout;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena.allocator();
+    // Lack of arena.deinit() is intentional as there is no need
+    // to free the memory in this short living program.  Same will
+    // go for all the allocations that will follow.
 
-    for (1..10) |i| { debug.print("i: {}\n", .{i}); }
+    // get args vith initial validation
+    const args = try std.process.argsAlloc(allocator);
+    if (args.len < 4) { stderr(help, .{}); return; }
+    const out = args[1];
+    const name = mem.trim(u8, args[2], " \t\n\r "); // the last one is hard space
+    if (name.len == 0) { stderr("Error: empty name\n", .{}); return; }
+    const count = parseU64(args[3]) orelse return; _ = count;
+    const seed = if (args.len > 4) (parseU64(args[4]) orelse return) else 0; _ = seed;
+
+    // create output files
+    var outdir = std.fs.cwd().openDir(out, .{ .iterate = true }) catch |err| {
+        stderr("Error: cannot open output path '{s}' ({s})\n", .{ out, @errorName(err) });
+        return;
+    };
+    defer outdir.close();
+
+    for (1..10) |i| { stderr("i: {}\n", .{i}); }
 
     // latitude  (y): [ -90;  90]
     // longitude (x): [-180; 180]
@@ -36,19 +80,24 @@ pub fn main() !void {
 
 }
 
+fn parseU64(val: []const u8) ?u64 {
+    return std.fmt.parseInt(u64, val, 10) catch |err| {
+        stderr("Error: value: '{s}' failed to parse as a positive integer ({s})\n", .{ val, @errorName(err) });
+        return null;
+    };
+}
 
-fn square(x: f64) f64 { return math.pow(f64, x, 2); }
+inline fn square(x: f64) f64 { return math.pow(f64, x, 2); }
 
 // https://en.wikipedia.org/wiki/Haversine_formula
-fn haversine(lon0: f64, lat0: f64, lon1: f64, lat1: f64) f64 {
-    const earth_radius = 6372.8; // that's an averrage
-    const dlat = math.degreesToRadians(lat1 - lat0);
-    const dlon = math.degreesToRadians(lon1 - lon0);
-    const rlat0 = math.degreesToRadians(lat0);
+fn haversine(lon1: f64, lat1: f64, lon2: f64, lat2: f64) f64 {
+    const earth_radius = 6372.8; // that's an averrage - there is no one eart radius
+    const dlat = math.degreesToRadians(lat2 - lat1);
+    const dlon = math.degreesToRadians(lon2 - lon1);
     const rlat1 = math.degreesToRadians(lat1);
-    const a = square(@sin(dlat/2.0)) + @cos(rlat0) * @cos(rlat1) * square(@sin(dlon/2.0));
-    const c = 2.0*math.asin(math.sqrt(a));
-    return earth_radius * c;
+    const rlat2 = math.degreesToRadians(lat2);
+    const tmp = square(@sin(dlat/2.0)) + @cos(rlat1) * @cos(rlat2) * square(@sin(dlon/2.0));
+    return earth_radius * 2.0 * math.asin(math.sqrt(tmp));
 }
 
 test { // zig test ./generate-data.zig
