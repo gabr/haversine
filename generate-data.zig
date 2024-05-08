@@ -1,4 +1,7 @@
-///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
+///usr/bin/env zig run -fno-llvm -fno-lld -fno-error-tracing "$0" -- "$@"; exit
+// -fno-llvm           disables LLVM to have faster compile time
+// -fno-lld            disables LLD to have faster linking time
+// -fno-error-tracing  print only simple error message on error
 const std    = @import("std");
 const stderr = std.debug.print;
 const fs     = std.fs;
@@ -6,6 +9,8 @@ const assert = std.debug.assert;
 const mem    = std.mem;
 const math   = std.math;
 
+// This is intentionally here and not inside Args struct because
+// it acts also as a documentation for the source code reader.
 const help =
 \\generate-data.zig
 \\  A program for generating random latitude and longitude point
@@ -37,6 +42,7 @@ const help =
 \\  # KNOWN_SEED=13
 \\  # ./generate-data.zig data/ retest 10 $KNOWN_SEED
 \\
+\\
 ;
 
 pub fn main() !void {
@@ -45,29 +51,14 @@ pub fn main() !void {
     // Lack of arena.deinit() is intentional as there is no
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
+    const args = try Args.get(allocator);
+    var out  = try Output.init(allocator, args);
+    // this is necessary to make sure that the file content is written out
+    defer out.deinit() catch |err| stderr("Failed to close output files.\nerror: {s}\n", .{@errorName(err)});
 
-    // get args vith initial validation
-    const args = try std.process.argsAlloc(allocator);
-    if (args.len < 4) { stderr(help, .{}); return; }
-    const out = args[1];
-    const name = mem.trim(u8, args[2], " \t\n\r "); // the last one is hard space
-    if (name.len == 0) { stderr("Error: empty name\n", .{}); return; }
-    const count = parseU64(args[3]) orelse return; _ = count;
-    const seed = if (args.len > 4) (parseU64(args[4]) orelse return) else 0; _ = seed;
+    try out.info.txt.print("Test\n", .{});
 
-    // create output files
-    var outdir = fs.cwd().openDir(out, .{ .iterate = true }) catch |err| {
-        stderr("Error: cannot open output path '{s}' ({s})\n", .{ out, @errorName(err) });
-        return;
-    };
-    defer outdir.close();
-    var data_json = try createFile(allocator, outdir, name, "data.json") orelse return; defer data_json.close();
-    var data_f64  = try createFile(allocator, outdir, name, "data.f64" ) orelse return; defer data_f64 .close();
-    var hsin_json = try createFile(allocator, outdir, name, "hsin.json") orelse return; defer hsin_json.close();
-    var hsin_f64  = try createFile(allocator, outdir, name, "hsin.f64" ) orelse return; defer hsin_f64 .close();
-    var info_txt  = try createFile(allocator, outdir, name, "info.txt" ) orelse return; defer info_txt .close();
-
-    for (1..10) |i| { stderr("i: {}\n", .{i}); }
+    for (0..args.count) |i| { stderr("i: {}\n", .{i}); }
 
     // latitude  (y): [ -90;  90]
     // longitude (x): [-180; 180]
@@ -86,21 +77,90 @@ pub fn main() !void {
 
 }
 
-fn parseU64(val: []const u8) ?u64 {
-    return std.fmt.parseInt(u64, val, 10) catch |err| {
-        stderr("Error: value: '{s}' failed to parse as a positive integer ({s})\n", .{ val, @errorName(err) });
-        return null;
-    };
-}
+const Args = struct {
+    args:  [][:0]u8,
+    out:   []const u8,
+    name:  []const u8,
+    count: u64,
+    seed:  u64,
 
-fn createFile(allocator: mem.Allocator, outdir: fs.Dir, name: []const u8, suf: []const u8) !?fs.File {
-    const path = try mem.join(allocator, "-", &[_][]const u8{ name, suf });
-    // the .exclusive = true is so we faile if the file already exist
-    return outdir.createFile(path, .{ .exclusive = true }) catch |err| {
-        stderr("Error: failed to create file: '{s}' ({s})\n", .{ path, @errorName(err) });
-        return null;
-    };
-}
+    /// Get command line arguments with initial validation and parsing.
+    pub fn get(allocator: mem.Allocator) !Args {
+        var a: Args = undefined;
+        a.args = try std.process.argsAlloc(allocator);
+        if (a.args.len < 4) { stderr(help, .{}); return error.NotEnoughArguments; }
+        a.out = a.args[1];
+        a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
+        if (a.name.len == 0) { stderr("empty name\n", .{}); return error.IncorrectArgument; }
+        a.count = try parseU64(a.args[3]);
+        a.seed = if (a.args.len > 4) try parseU64(a.args[4]) else 0;
+        return a;
+    }
+
+    fn parseU64(val: []const u8) !u64 {
+        return std.fmt.parseInt(u64, val, 10) catch |err| {
+            stderr("value: '{s}' failed to parse as a positive integer\n", .{val});
+            return err;
+        };
+    }
+};
+
+const Output = struct {
+    // The structs are here to mimic the file names when accessing
+    // the fields like: file "name-data.json" is: "Output.data.json".
+    // See the help variable at the top to understand output structre.
+    // These are meant to be accessed directly to write into files.
+    data: struct { json: fs.File.Writer, f64: fs.File.Writer, },
+    hsin: struct { json: fs.File.Writer, f64: fs.File.Writer, },
+    info: struct { txt:  fs.File.Writer, },
+    // These are stored only for the deinit() function.
+    dir: fs.Dir,
+    file: struct {
+        data: struct { json: fs.File, f64: fs.File, },
+        hsin: struct { json: fs.File, f64: fs.File, },
+        info: struct { txt:  fs.File, },
+    },
+
+    pub fn init(allocator: mem.Allocator, args: Args) !Output {
+        var out: Output = undefined;
+        out.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
+            stderr("cannot open output path '{s}'\n", .{args.out});
+            return err;
+        };
+        out.file.data.json = try createFile(allocator, out.dir, args.name, "data.json");
+        out.file.data.f64  = try createFile(allocator, out.dir, args.name, "data.f64" );
+        out.file.hsin.json = try createFile(allocator, out.dir, args.name, "hsin.json");
+        out.file.hsin.f64  = try createFile(allocator, out.dir, args.name, "hsin.f64" );
+        out.file.info.txt  = try createFile(allocator, out.dir, args.name, "info.txt" );
+        // TODO: change to buffered writers with big buffers
+        out.data.json = out.file.data.json.writer();
+        out.data.f64  = out.file.data.f64 .writer();
+        out.hsin.json = out.file.hsin.json.writer();
+        out.hsin.f64  = out.file.hsin.f64 .writer();
+        out.info.txt  = out.file.info.txt .writer();
+        return out;
+    }
+
+    pub fn deinit(self: *Output) !void {
+        self.file.data.json.close();
+        self.file.data.f64.close();
+        self.file.hsin.json.close();
+        self.file.hsin.f64.close();
+        self.file.info.txt.close();
+        self.dir.close();
+    }
+
+    /// Creates file with given name prefix and suffix in given directory.
+    /// Will fail if file already exists.
+    fn createFile(allocator: mem.Allocator, outdir: fs.Dir, name: []const u8, suf: []const u8) !fs.File {
+        const path = try mem.join(allocator, "-", &[_][]const u8{ name, suf });
+        // the .exclusive = true is so we faile if the file already exist
+        return outdir.createFile(path, .{ .exclusive = true }) catch |err| {
+            stderr("failed to create file: '{s}'\n", .{path});
+            return err;
+        };
+    }
+};
 
 inline fn square(x: f64) f64 { return math.pow(f64, x, 2); }
 
