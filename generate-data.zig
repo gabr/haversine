@@ -1,6 +1,7 @@
 ///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
 const std    = @import("std");
 const stderr = std.debug.print;
+const fs     = std.fs;
 const assert = std.debug.assert;
 const mem    = std.mem;
 const math   = std.math;
@@ -18,7 +19,7 @@ const help =
 \\    count   [u64]     Positive numeric value of how many pairs to generate.
 \\    seed    [u64]     Optional positive numeric value used as a seed for randomness.
 \\
-\\As its output program generates files:
+\\The output of the program are files:
 \\
 \\  1. name-data.json - the JSON output with the latitude and longitude pairs
 \\  2. name-data.f64  - binary file with the same floats as in output.json
@@ -41,9 +42,9 @@ const help =
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
-    // Lack of arena.deinit() is intentional as there is no need
-    // to free the memory in this short living program.  Same will
-    // go for all the allocations that will follow.
+    // Lack of arena.deinit() is intentional as there is no
+    // need to free the memory in this short living program.
+    // Same will go for all the allocations that will follow.
 
     // get args vith initial validation
     const args = try std.process.argsAlloc(allocator);
@@ -55,11 +56,16 @@ pub fn main() !void {
     const seed = if (args.len > 4) (parseU64(args[4]) orelse return) else 0; _ = seed;
 
     // create output files
-    var outdir = std.fs.cwd().openDir(out, .{ .iterate = true }) catch |err| {
+    var outdir = fs.cwd().openDir(out, .{ .iterate = true }) catch |err| {
         stderr("Error: cannot open output path '{s}' ({s})\n", .{ out, @errorName(err) });
         return;
     };
     defer outdir.close();
+    var data_json = try createFile(allocator, outdir, name, "data.json") orelse return; defer data_json.close();
+    var data_f64  = try createFile(allocator, outdir, name, "data.f64" ) orelse return; defer data_f64 .close();
+    var hsin_json = try createFile(allocator, outdir, name, "hsin.json") orelse return; defer hsin_json.close();
+    var hsin_f64  = try createFile(allocator, outdir, name, "hsin.f64" ) orelse return; defer hsin_f64 .close();
+    var info_txt  = try createFile(allocator, outdir, name, "info.txt" ) orelse return; defer info_txt .close();
 
     for (1..10) |i| { stderr("i: {}\n", .{i}); }
 
@@ -83,6 +89,15 @@ pub fn main() !void {
 fn parseU64(val: []const u8) ?u64 {
     return std.fmt.parseInt(u64, val, 10) catch |err| {
         stderr("Error: value: '{s}' failed to parse as a positive integer ({s})\n", .{ val, @errorName(err) });
+        return null;
+    };
+}
+
+fn createFile(allocator: mem.Allocator, outdir: fs.Dir, name: []const u8, suf: []const u8) !?fs.File {
+    const path = try mem.join(allocator, "-", &[_][]const u8{ name, suf });
+    // the .exclusive = true is so we faile if the file already exist
+    return outdir.createFile(path, .{ .exclusive = true }) catch |err| {
+        stderr("Error: failed to create file: '{s}' ({s})\n", .{ path, @errorName(err) });
         return null;
     };
 }
