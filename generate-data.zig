@@ -53,8 +53,6 @@ pub fn main() !void {
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
     var out  = try Output.init(allocator, args);
-    // this is necessary to make sure that the file content is written out
-    defer out.deinit() catch |err| stderr("Failed to close output files.\nerror: {s}\n", .{@errorName(err)});
 
     try out.info.txt.print("Test\n", .{});
 
@@ -75,6 +73,7 @@ pub fn main() !void {
     //     {"x0":8.1610847750272519,   "y0":-38.2671013246085465, "x1":14.7521018520305667,  "y1":-61.2419556816616790}
     // ]}
 
+    try out.deinit();
 }
 
 const Args = struct {
@@ -110,9 +109,9 @@ const Output = struct {
     // the fields like: file "name-data.json" is: "Output.data.json".
     // See the help variable at the top to understand output structre.
     // These are meant to be accessed directly to write into files.
-    data: struct { json: fs.File.Writer, f64: fs.File.Writer, },
-    hsin: struct { json: fs.File.Writer, f64: fs.File.Writer, },
-    info: struct { txt:  fs.File.Writer, },
+    data: struct { json: BufWriter.Writer, f64: BufWriter.Writer, },
+    hsin: struct { json: BufWriter.Writer, f64: BufWriter.Writer, },
+    info: struct { txt:  BufWriter.Writer, },
     // These are stored only for the deinit() function.
     dir: fs.Dir,
     file: struct {
@@ -120,8 +119,15 @@ const Output = struct {
         hsin: struct { json: fs.File, f64: fs.File, },
         info: struct { txt:  fs.File, },
     },
+    buffer: struct {
+        data: struct { json: BufWriter, f64: BufWriter, },
+        hsin: struct { json: BufWriter, f64: BufWriter, },
+        info: struct { txt:  BufWriter, },
+    },
 
-    pub fn init(allocator: mem.Allocator, args: Args) !Output {
+    const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
+
+    pub fn init(allocator: mem.Allocator, args: Args) !*Output {
         var out: Output = undefined;
         out.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
             stderr("cannot open output path '{s}'\n", .{args.out});
@@ -132,16 +138,25 @@ const Output = struct {
         out.file.hsin.json = try createFile(allocator, out.dir, args.name, "hsin.json");
         out.file.hsin.f64  = try createFile(allocator, out.dir, args.name, "hsin.f64" );
         out.file.info.txt  = try createFile(allocator, out.dir, args.name, "info.txt" );
-        // TODO: change to buffered writers with big buffers
-        out.data.json = out.file.data.json.writer();
-        out.data.f64  = out.file.data.f64 .writer();
-        out.hsin.json = out.file.hsin.json.writer();
-        out.hsin.f64  = out.file.hsin.f64 .writer();
-        out.info.txt  = out.file.info.txt .writer();
-        return out;
+        out.buffer.data.json = BufWriter { .unbuffered_writer = out.file.data.json.writer() };
+        out.buffer.data.f64  = BufWriter { .unbuffered_writer = out.file.data.f64 .writer() };
+        out.buffer.hsin.json = BufWriter { .unbuffered_writer = out.file.hsin.json.writer() };
+        out.buffer.hsin.f64  = BufWriter { .unbuffered_writer = out.file.hsin.f64 .writer() };
+        out.buffer.info.txt  = BufWriter { .unbuffered_writer = out.file.info.txt .writer() };
+        out.data.json = out.buffer.data.json.writer();
+        out.data.f64  = out.buffer.data.f64 .writer();
+        out.hsin.json = out.buffer.hsin.json.writer();
+        out.hsin.f64  = out.buffer.hsin.f64 .writer();
+        out.info.txt  = out.buffer.info.txt .writer();
+        return &out;
     }
 
     pub fn deinit(self: *Output) !void {
+        try self.buffer.data.json.flush();
+        try self.buffer.data.f64.flush();
+        try self.buffer.hsin.json.flush();
+        try self.buffer.hsin.f64.flush();
+        try self.buffer.info.txt.flush();
         self.file.data.json.close();
         self.file.data.f64.close();
         self.file.hsin.json.close();
