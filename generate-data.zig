@@ -54,7 +54,7 @@ pub fn main() !void {
     const args = try Args.get(allocator);
     var out  = try Output.init(allocator, args);
 
-    try out.info.txt.print("Test\n", .{});
+    try out.writer[@intFromEnum(File.info_txt)].print("Test\n", .{});
 
     for (0..args.count) |i| { stderr("i: {}\n", .{i}); }
 
@@ -104,28 +104,22 @@ const Args = struct {
     }
 };
 
-const Output = struct {
-    // The structs are here to mimic the file names when accessing
-    // the fields like: file "name-data.json" is: "Output.data.json".
-    // See the help variable at the top to understand output structre.
-    // These are meant to be accessed directly to write into files.
-    data: struct { json: BufWriter.Writer, f64: BufWriter.Writer, },
-    hsin: struct { json: BufWriter.Writer, f64: BufWriter.Writer, },
-    info: struct { txt:  BufWriter.Writer, },
-    // These are stored only for the deinit() function.
-    dir: fs.Dir,
-    file: struct {
-        data: struct { json: fs.File, f64: fs.File, },
-        hsin: struct { json: fs.File, f64: fs.File, },
-        info: struct { txt:  fs.File, },
-    },
-    buffer: struct {
-        data: struct { json: BufWriter, f64: BufWriter, },
-        hsin: struct { json: BufWriter, f64: BufWriter, },
-        info: struct { txt:  BufWriter, },
-    },
+pub const File = enum {
+    data_json,
+    data_f64,
+    hsin_json,
+    hsin_f64,
+    info_txt
+};
 
-    const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
+const Output = struct {
+    dir:    fs.Dir,
+    file:   [count]fs.File,
+    buffer: [count]BufWriter,
+    writer: [count]BufWriter.Writer,
+
+    pub const count = @typeInfo(File).Enum.fields.len;
+    pub const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
 
     pub fn init(allocator: mem.Allocator, args: Args) !*Output {
         var out: Output = undefined;
@@ -133,35 +127,22 @@ const Output = struct {
             stderr("cannot open output path '{s}'\n", .{args.out});
             return err;
         };
-        out.file.data.json = try createFile(allocator, out.dir, args.name, "data.json");
-        out.file.data.f64  = try createFile(allocator, out.dir, args.name, "data.f64" );
-        out.file.hsin.json = try createFile(allocator, out.dir, args.name, "hsin.json");
-        out.file.hsin.f64  = try createFile(allocator, out.dir, args.name, "hsin.f64" );
-        out.file.info.txt  = try createFile(allocator, out.dir, args.name, "info.txt" );
-        out.buffer.data.json = BufWriter { .unbuffered_writer = out.file.data.json.writer() };
-        out.buffer.data.f64  = BufWriter { .unbuffered_writer = out.file.data.f64 .writer() };
-        out.buffer.hsin.json = BufWriter { .unbuffered_writer = out.file.hsin.json.writer() };
-        out.buffer.hsin.f64  = BufWriter { .unbuffered_writer = out.file.hsin.f64 .writer() };
-        out.buffer.info.txt  = BufWriter { .unbuffered_writer = out.file.info.txt .writer() };
-        out.data.json = out.buffer.data.json.writer();
-        out.data.f64  = out.buffer.data.f64 .writer();
-        out.hsin.json = out.buffer.hsin.json.writer();
-        out.hsin.f64  = out.buffer.hsin.f64 .writer();
-        out.info.txt  = out.buffer.info.txt .writer();
+        for (0..count) |i| {
+            // generate file name from enum
+            const file_name = try allocator.dupe(u8, @tagName(@as(File, @enumFromInt(i))));
+            file_name[4] = '.'; // replace _ with .
+            out.file  [i] = try createFile(allocator, out.dir, args.name, file_name);
+            out.buffer[i] = BufWriter { .unbuffered_writer = out.file[i].writer() };
+            out.writer[i] = out.buffer[i].writer();
+        }
         return &out;
     }
 
     pub fn deinit(self: *Output) !void {
-        try self.buffer.data.json.flush();
-        try self.buffer.data.f64.flush();
-        try self.buffer.hsin.json.flush();
-        try self.buffer.hsin.f64.flush();
-        try self.buffer.info.txt.flush();
-        self.file.data.json.close();
-        self.file.data.f64.close();
-        self.file.hsin.json.close();
-        self.file.hsin.f64.close();
-        self.file.info.txt.close();
+        for (0..count) |i| {
+            try self.buffer[i].flush();
+                self.file  [i].close();
+        }
         self.dir.close();
     }
 
