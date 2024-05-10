@@ -1,4 +1,4 @@
-///usr/bin/env zig run -fno-llvm -fno-lld -O ReleaseSafe "$0" -- "$@"; exit
+///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
 // -fno-llvm           disables LLVM to have faster compile time
 // -fno-lld            disables LLD to have faster linking time
 // -fno-error-tracing  print only simple error message on error
