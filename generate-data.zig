@@ -144,24 +144,24 @@ const Output = struct {
     }
 };
 
-// typed out on one breath - somehow tested - should work
-fn getDateTime() ![]const u8 {
+// typed out on one breath - somehow tested - worked today
+// timestamp should be UTC 1970-01-01 in seconds
+fn getDateTime(timestamp: i64) ![]const u8 {
+    assert(timestamp>0); // no time travelers
+    var t: u32 = @intCast(timestamp); // so we can cast to u32
     const Static = struct { var buf: ["yyyy-mm-ddThh:mm:ssZ".len]u8 = undefined; };
     const sec_per_min  : u32 = 60;
     const sec_per_hour : u32 = 60*sec_per_min;
     const sec_per_day  : u32 = 24*sec_per_hour;
     const sec_per_year : u32 = 365*sec_per_day;
-    const stimestamp = std.time.timestamp(); // UTC 1970-01-01 in seconds
-    assert(stimestamp>0); // no time travelers
-    var timestamp: u32 = @intCast(stimestamp); // so we can cast to u32
-    const years = @divTrunc(timestamp, sec_per_year);
+    const years = @divTrunc(t, sec_per_year);
     const year = 1970 + years;
     assert(years>2); // we assume at least 1972 for ease of calculation
     const leap_years = @divTrunc((years-2), 4)+1;
-    timestamp -= (years*sec_per_year)+((leap_years-2)*sec_per_day);
+    t -= (years*sec_per_year)+((leap_years)*sec_per_day);
     var feb : u8 = 28; if (@rem(year,4)==0) feb += 1;
-    const day : u32 = @divTrunc(timestamp, sec_per_day);
-    timestamp = @rem(timestamp, sec_per_day);
+    const day : u32 = @divTrunc(t, sec_per_day) + 2;
+    t = @rem(t, sec_per_day);
     var month: u32 = 1;
     var month_day: u32 = day;
     const months = [_]u8 { 31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
@@ -174,11 +174,11 @@ fn getDateTime() ![]const u8 {
             break;
         }
     }
-    const hour = @divTrunc(timestamp, sec_per_hour);
-    timestamp = @rem(timestamp, sec_per_hour);
-    const min = @divTrunc(timestamp, sec_per_min);
-    timestamp = @rem(timestamp, sec_per_min);
-    const sec = timestamp;
+    const hour = @divTrunc(t, sec_per_hour);
+    t = @rem(t, sec_per_hour);
+    const min = @divTrunc(t, sec_per_min);
+    t = @rem(t, sec_per_min);
+    const sec = t;
     assert(year>1972 and year<9999);
     assert(month>0 and month<13);
     assert(month_day>0 and month_day<32);
@@ -192,7 +192,7 @@ fn getDateTime() ![]const u8 {
 
 fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
     // write out startup info data
-    try out.info("time:  {s}\n", .{try getDateTime()});
+    try out.info("time:  {s}\n", .{try getDateTime(std.time.timestamp())});
     try out.info("cmd:   {s}\n", .{try mem.join(allocator, " ", args.args)});
     try out.info("out:   {s}\n", .{args.out});
     try out.info("name:  {s}\n", .{args.name});
@@ -226,6 +226,15 @@ fn haversine(lon1: f64, lat1: f64, lon2: f64, lat2: f64) f64 {
     const rlat2 = math.degreesToRadians(lat2);
     const tmp = square(@sin(dlat/2.0)) + @cos(rlat1) * @cos(rlat2) * square(@sin(dlon/2.0));
     return earth_radius * 2.0 * math.asin(math.sqrt(tmp));
+}
+
+test "getDateTime" {
+    const eq = std.testing.expectEqualStrings;
+    try eq("1973-01-01T00:00:00Z", try getDateTime(5097600));
+    try eq("2000-02-29T07:21:22Z", try getDateTime(951808882));
+    try eq("2012-06-12T07:21:22Z", try getDateTime(1339485682));
+    try eq("1992-03-03T01:20:00Z", try getDateTime(699585600));
+
 }
 
 test { // zig test ./generate-data.zig
