@@ -115,10 +115,12 @@ const Output = struct {
             out.buffer[i] = BufWriter { .unbuffered_writer = out.file[i].writer() };
             out.writer[i] = out.buffer[i].writer();
         }
+        try out.startJsons();
         return &out;
     }
 
     pub fn deinit(self: *Output) !void {
+        try self.closeJsons();
         for (0..count) |i| {
             try self.buffer[i].flush();
                 self.file  [i].close();
@@ -126,10 +128,45 @@ const Output = struct {
         self.dir.close();
     }
 
+    fn startJsons(self: *Output) !void {
+        // write directly to file to skip buffer as it's size is calculated
+        // for each data line without considering the header
+        try self.file[@intFromEnum(File.data_json)].writer().writeAll("{\"pairs\":[\n");
+        try self.file[@intFromEnum(File.hsin_json)].writer().writeAll("{\"haversine distances\":[\n");
+    }
+
+    fn closeJsons(self: *Output) !void {
+        // remove tailing commas from files before closing
+        try self.buffer[@intFromEnum(File.data_json)].flush();  // Flush out the buffers
+        try self.buffer[@intFromEnum(File.hsin_json)].flush();  // so we can seek back in files.
+        try self.file[@intFromEnum(File.data_json)].seekBy(-2); // Remove new line and the comma
+        try self.file[@intFromEnum(File.hsin_json)].seekBy(-2); // in both files.
+        // trust me I'm a highly trained kitten =^..^= <meow, meow, -2, meo>
+        try self.writer[@intFromEnum(File.data_json)].writeAll("\n]}\n");
+        try self.writer[@intFromEnum(File.hsin_json)].writeAll("\n]}\n");
+    }
+
     /// Puts message both into info.txt file and stderr
     pub fn info(self: *Output, comptime fmt: []const u8, args: anytype) !void {
         stderr(fmt, args);
         try self.writer[@intFromEnum(File.info_txt)].print(fmt, args);
+    }
+
+    /// Writes all the data to the correct float binary output files
+    pub fn writeFloat(self: *Output, lon1: f64, lat1: f64, lon2: f64, lat2: f64, hsin: f64) !void {
+        try self.writer[@intFromEnum(File.data_f64)].writeAll(&mem.toBytes(lon1));
+        try self.writer[@intFromEnum(File.data_f64)].writeAll(&mem.toBytes(lat1));
+        try self.writer[@intFromEnum(File.data_f64)].writeAll(&mem.toBytes(lon2));
+        try self.writer[@intFromEnum(File.data_f64)].writeAll(&mem.toBytes(lat2));
+        try self.writer[@intFromEnum(File.hsin_f64)].writeAll(&mem.toBytes(hsin));
+    }
+
+    /// Writes all the data to the correct json output files
+    pub fn writeJson(self: *Output, lon1: f64, lat1: f64, lon2: f64, lat2: f64, hsin: f64) !void {
+        const data_json_fmt = "  {{\"x0\":{d}, \"y0\":{d}, \"x1\":{d}, \"y1\":{d}}},\n";
+        const hsin_json_fmt = "  {d},\n";
+        try self.writer[@intFromEnum(File.data_json)].print(data_json_fmt, .{lon1, lat1, lon2, lat2});
+        try self.writer[@intFromEnum(File.hsin_json)].print(hsin_json_fmt, .{hsin});
     }
 
     /// Creates file with given name prefix and suffix in given directory.
@@ -144,28 +181,29 @@ const Output = struct {
     }
 };
 
+fn getRandomFloatInRange(rand: *std.Random.SplitMix64, min: i32, max: i32) f64 {
+    _ = rand;
+    _ = min;
+    _ = max;
+    return 12.345;
+}
+
 fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
-    // write out startup info data
     try out.info("cmd:   {s}\n", .{try mem.join(allocator, " ", args.args)});
     try out.info("out:   {s}\n", .{args.out});
     try out.info("name:  {s}\n", .{args.name});
     try out.info("count: {d}\n", .{args.count});
     try out.info("seed:  {d}\n", .{args.seed});
-
-    // latitude  (y): [ -90;  90]
-    // longitude (x): [-180; 180]
-    // {"pairs":[
-    //     {"x0":102.1633205722960440, "y0":-24.9977499718717624, "x1":-14.3322557404258362, "y1":62.6708294856625940},
-    //     {"x0":106.8565762320475301, "y0":11.9375999763435772,  "x1":160.8862834978823457, "y1":69.1998577207801731},
-    //     {"x0":-8.8878390193835415,  "y0":19.0969814947109811,  "x1":-46.8743926814281267, "y1":43.8734538780514995},
-    //     {"x0":-14.6150077801348424, "y0":38.3262373436592725,  "x1":-44.3948041164556955, "y1":53.2633096739310474},
-    //     {"x0":152.2097004499833020, "y0":28.8075361257721383,  "x1":150.6987913536557357, "y1":32.0449908116227959},
-    //     {"x0":163.7513986349316610, "y0":32.3825205307932791,  "x1":152.5987721841468954, "y1":29.8302328719929157},
-    //     {"x0":131.0675707860914372, "y0":47.0663770222409354,  "x1":123.5929119363244411, "y1":46.3284990503599943},
-    //     {"x0":122.1332570844595011, "y0":47.1276485830673622,  "x1":122.2277624036606340, "y1":45.8344893091440824},
-    //     {"x0":177.4032764475290946, "y0":-29.8936958880840180, "x1":93.6601882829341008,  "y1":-79.6531326321997426},
-    //     {"x0":8.1610847750272519,   "y0":-38.2671013246085465, "x1":14.7521018520305667,  "y1":-61.2419556816616790}
-    // ]}
+    var rand = std.Random.SplitMix64.init(args.seed);
+    for (0..args.count) |_| {
+        const lon1 = getRandomFloatInRange(&rand, -180, 180);
+        const lat1 = getRandomFloatInRange(&rand,  -90,  90);
+        const lon2 = getRandomFloatInRange(&rand, -180, 180);
+        const lat2 = getRandomFloatInRange(&rand,  -90,  90);
+        const hsin = haversine(lon1, lat1, lon2, lat2);
+        try out.writeFloat(lon1, lat1, lon2, lat2, hsin);
+        try out.writeJson(lon1, lat1, lon2, lat2, hsin);
+    }
 }
 
 inline fn square(x: f64) f64 { return math.pow(f64, x, 2); }
