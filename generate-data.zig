@@ -181,11 +181,11 @@ const Output = struct {
     }
 };
 
-fn getRandomFloatInRange(rand: *std.Random.SplitMix64, min: i32, max: i32) f64 {
-    _ = rand;
-    _ = min;
-    _ = max;
-    return 12.345;
+fn getRandomFloatInRange(rand: *std.Random, min: i32, max: i32) f64 {
+    assert(max > min);
+    const num: f64 = @floatFromInt(rand.intRangeAtMost(i32, min, max-1));
+    const den: f64 = rand.float(f64);
+    return num + den;
 }
 
 fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
@@ -194,7 +194,8 @@ fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
     try out.info("name:  {s}\n", .{args.name});
     try out.info("count: {d}\n", .{args.count});
     try out.info("seed:  {d}\n", .{args.seed});
-    var rand = std.Random.SplitMix64.init(args.seed);
+    var pcg = std.Random.Pcg.init(args.seed);
+    var rand = pcg.random();
     for (0..args.count) |_| {
         const lon1 = getRandomFloatInRange(&rand, -180, 180);
         const lat1 = getRandomFloatInRange(&rand,  -90,  90);
