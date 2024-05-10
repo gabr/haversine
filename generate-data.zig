@@ -12,7 +12,7 @@ const help =
 \\
 \\    output  <string>  Existing location in which output files will be generated.
 \\    name    <string>  Name prefix used for each of the generated output files.
-\\    count   <u64>     Positive numeric value of how many pairs to generate.
+\\    count   <u34>     Positive numeric value of how many pairs to generate.
 \\    seed    <u64>     Optional positive numeric value used as a seed for randomness.
 \\
 \\The output of the program are files:
@@ -29,7 +29,7 @@ const help =
 \\  # ./generate-data.zig data/ small 10
 \\  # ./generate-data.zig data/ big   100000
 \\  # ./generate-data.zig data/ huge  100000000
-\\  # ./generate-data.zig data/ max   18446744073709551615
+\\  # ./generate-data.zig data/ max   4294967295
 \\  # KNOWN_SEED=13
 \\  # ./generate-data.zig data/ retest 10 $KNOWN_SEED
 \\
@@ -60,7 +60,7 @@ const Args = struct {
     args:  [][:0]u8,
     out:   []const u8,
     name:  []const u8,
-    count: u64,
+    count: u34,
     seed:  u64,
 
     /// Get command line arguments with initial validation and parsing.
@@ -71,13 +71,13 @@ const Args = struct {
         a.out = a.args[1];
         a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
         if (a.name.len == 0) { stderr("empty name\n", .{}); return error.IncorrectArgument; }
-        a.count = try parseU64(a.args[3]);
-        a.seed = if (a.args.len > 4) try parseU64(a.args[4]) else 0;
+        a.count = try parseInt(u32, a.args[3]);
+        a.seed = if (a.args.len > 4) try parseInt(u64, a.args[4]) else 0;
         return a;
     }
 
-    fn parseU64(val: []const u8) !u64 {
-        return std.fmt.parseInt(u64, val, 10) catch |err| {
+    fn parseInt(T: type, val: []const u8) !T {
+        return std.fmt.parseInt(T, val, 10) catch |err| {
             stderr("value: '{s}' failed to parse as a positive integer\n", .{val});
             return err;
         };
@@ -194,6 +194,7 @@ fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
     try out.info("name:  {s}\n", .{args.name});
     try out.info("count: {d}\n", .{args.count});
     try out.info("seed:  {d}\n", .{args.seed});
+    var hsum: f64 = 0;
     var pcg = std.Random.Pcg.init(args.seed);
     var rand = pcg.random();
     for (0..args.count) |_| {
@@ -202,9 +203,12 @@ fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
         const lon2 = getRandomFloatInRange(&rand, -180, 180);
         const lat2 = getRandomFloatInRange(&rand,  -90,  90);
         const hsin = haversine(lon1, lat1, lon2, lat2);
+        hsum += hsin;
         try out.writeFloat(lon1, lat1, lon2, lat2, hsin);
         try out.writeJson(lon1, lat1, lon2, lat2, hsin);
     }
+    const havr = hsum / @as(f64, @floatFromInt(args.count));
+    try out.info("\nHaversine sums average: {d}\n", .{havr});
 }
 
 inline fn square(x: f64) f64 { return math.pow(f64, x, 2); }
