@@ -1,4 +1,4 @@
-///usr/bin/env zig run -fno-llvm -fno-lld -fno-error-tracing "$0" -- "$@"; exit
+///usr/bin/env zig run -fno-llvm -fno-lld -O ReleaseSafe "$0" -- "$@"; exit
 // -fno-llvm           disables LLVM to have faster compile time
 // -fno-lld            disables LLD to have faster linking time
 // -fno-error-tracing  print only simple error message on error
@@ -50,7 +50,7 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
-    var out  = try Output.init(allocator, args);
+    const out  = try Output.init(allocator, args);
     // doing it like that to at least try to flush the data out in case of any error
     defer out.deinit() catch |err| stderr("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
     try generate(allocator, args, out);
@@ -102,7 +102,7 @@ const Output = struct {
     pub const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
 
     pub fn init(allocator: mem.Allocator, args: Args) !*Output {
-        var out: Output = undefined;
+        var out = try allocator.create(Output);
         out.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
             stderr("cannot open output path '{s}'\n", .{args.out});
             return err;
@@ -116,7 +116,7 @@ const Output = struct {
             out.writer[i] = out.buffer[i].writer();
         }
         try out.startJsons();
-        return &out;
+        return out;
     }
 
     pub fn deinit(self: *Output) !void {
