@@ -50,10 +50,11 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
-    const out  = try Output.init(allocator, args);
+    var out: Output = undefined;
+    try out.init(allocator, args);
     // doing it like that to at least try to flush the data out in case of any error
     defer out.deinit() catch |err| stderr("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
-    try generate(allocator, args, out);
+    try generate(allocator, args, &out);
 }
 
 const Args = struct {
@@ -101,9 +102,8 @@ const Output = struct {
     pub const count = @typeInfo(File).Enum.fields.len;
     pub const BufWriter = std.io.BufferedWriter(10*4096, fs.File.Writer);
 
-    pub fn init(allocator: mem.Allocator, args: Args) !*Output {
-        var out = try allocator.create(Output);
-        out.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
+    pub fn init(self: *Output, allocator: mem.Allocator, args: Args) !void {
+        self.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
             stderr("cannot open output path '{s}'\n", .{args.out});
             return err;
         };
@@ -111,12 +111,11 @@ const Output = struct {
             // generate file name from enum
             const file_name = try allocator.dupe(u8, @tagName(@as(File, @enumFromInt(i))));
             file_name[4] = '.'; // replace _ with .
-            out.file  [i] = try createFile(allocator, out.dir, args.name, file_name);
-            out.buffer[i] = BufWriter { .unbuffered_writer = out.file[i].writer() };
-            out.writer[i] = out.buffer[i].writer();
+            self.file  [i] = try createFile(allocator, self.dir, args.name, file_name);
+            self.buffer[i] = .{ .unbuffered_writer = self.file[i].writer() };
+            self.writer[i] = self.buffer[i].writer();
         }
-        try out.startJsons();
-        return out;
+        try self.startJsons();
     }
 
     pub fn deinit(self: *Output) !void {
