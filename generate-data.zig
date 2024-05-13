@@ -72,7 +72,7 @@ const Args = struct {
         a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
         if (a.name.len == 0) { stderr("empty name\n", .{}); return error.IncorrectArgument; }
         a.count = try parseInt(u32, a.args[3]);
-        a.seed = if (a.args.len > 4) try parseInt(u64, a.args[4]) else 0;
+        a.seed = if (a.args.len > 4) try parseInt(u64, a.args[4]) else 0x0123456789abcdef;
         return a;
     }
 
@@ -99,7 +99,7 @@ const Output = struct {
     writer: [count]BufWriter.Writer,
 
     pub const count = @typeInfo(File).Enum.fields.len;
-    pub const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
+    pub const BufWriter = std.io.BufferedWriter(10*4096, fs.File.Writer);
 
     pub fn init(allocator: mem.Allocator, args: Args) !*Output {
         var out = try allocator.create(Output);
@@ -181,11 +181,10 @@ const Output = struct {
     }
 };
 
-fn getRandomFloatInRange(rand: *std.Random, min: i32, max: i32) f64 {
+fn getRandomFloatInRange(rand: *std.Random, min: f64, max: f64) f64 {
     assert(max > min);
-    const num: f64 = @floatFromInt(rand.intRangeAtMost(i32, min, max-1));
-    const den: f64 = rand.float(f64);
-    return num + den;
+    const r = rand.float(f64);
+    return (1.0 - r)*min + r*max;
 }
 
 fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
@@ -224,7 +223,3 @@ fn haversine(lon1: f64, lat1: f64, lon2: f64, lat2: f64) f64 {
     return earth_radius * 2.0 * math.asin(math.sqrt(tmp));
 }
 
-test { // zig test ./generate-data.zig
-    _ = square;
-    _ = haversine;
-}
