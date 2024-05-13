@@ -36,12 +36,12 @@ const help =
 \\
 ;
 
-const std    = @import("std");
-const stderr = std.debug.print;
-const fs     = std.fs;
-const assert = std.debug.assert;
-const mem    = std.mem;
-const math   = std.math;
+const std       = @import("std");
+const stderr    = std.debug.print;
+const fs        = std.fs;
+const assert    = std.debug.assert;
+const mem       = std.mem;
+const haversine = @import("common.zig").haversine;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -207,18 +207,5 @@ fn generate(allocator: mem.Allocator, args: Args, out: *Output) !void {
     }
     const havr = hsum / @as(f64, @floatFromInt(args.count));
     try out.info("\nHaversine sums average: {d}\n", .{havr});
-}
-
-inline fn square(x: f64) f64 { return math.pow(f64, x, 2); }
-
-// https://en.wikipedia.org/wiki/Haversine_formula
-fn haversine(lon1: f64, lat1: f64, lon2: f64, lat2: f64) f64 {
-    const earth_radius = 6372.8; // that's an averrage - there is no one eart radius
-    const dlat = math.degreesToRadians(lat2 - lat1);
-    const dlon = math.degreesToRadians(lon2 - lon1);
-    const rlat1 = math.degreesToRadians(lat1);
-    const rlat2 = math.degreesToRadians(lat2);
-    const tmp = square(@sin(dlat/2.0)) + @cos(rlat1) * @cos(rlat2) * square(@sin(dlon/2.0));
-    return earth_radius * 2.0 * math.asin(math.sqrt(tmp));
 }
 
