@@ -1,14 +1,14 @@
-///usr/bin/env zig run -fno-llvm -fno-lld "$0" -- "$@"; exit
+///usr/bin/env zig run -fno-llvm -fno-lld -fno-error-tracing "$0" -- "$@"; exit
 // -fno-llvm           disables LLVM to have faster compile time
 // -fno-lld            disables LLD to have faster linking time
 // -fno-error-tracing  print only simple error message on error
 const help =
-\\generate-data.zig
-\\  A program for generating random latitude and longitude point
+\\generate-data
+\\  A program for generating random latitude-longitude point
 \\  pairs with Haversine distances calculated for each point.
 \\
 \\Usage:
-\\  ./generate-data.zig output name count [seed]
+\\  generate-data output name count [seed]
 \\
 \\    output  <string>  Existing location in which output files will be generated.
 \\    name    <string>  Name prefix used for each of the generated output files.
@@ -16,9 +16,8 @@ const help =
 \\    seed    <u64>     Optional positive numeric value used as a seed for randomness.
 \\
 \\The output of the program are files:
-\\
-\\  1. name-data.json - the JSON output with the latitude and longitude pairs
-\\  2. name-data.f64  - binary file with the same floats as in output.json
+\\  1. name-data.json - the JSON data with the latitude and longitude pairs
+\\  2. name-data.f64  - binary file with the same floats as in data.json
 \\  3. name-hsin.json - Haversine distance for each pair as a JSON
 \\  4. name-hsin.f64  - Haversine distance for each pair as binary floats
 \\  5. name-info.txt  - summary and general info about the data
@@ -37,7 +36,7 @@ const help =
 ;
 
 const std       = @import("std");
-const stderr    = std.debug.print;
+const dstderr   = std.debug.print;
 const fs        = std.fs;
 const assert    = std.debug.assert;
 const mem       = std.mem;
@@ -53,7 +52,7 @@ pub fn main() !void {
     var out: Output = undefined;
     try out.init(allocator, args);
     // doing it like that to at least try to flush the data out in case of any error
-    defer out.deinit() catch |err| stderr("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
+    defer out.deinit() catch |err| dstderr("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
     try generate(allocator, args, &out);
 }
 
@@ -67,11 +66,12 @@ const Args = struct {
     /// Get command line arguments with initial validation and parsing.
     pub fn get(allocator: mem.Allocator) !Args {
         var a: Args = undefined;
+        const stderr = std.io.getStdErr().writer();
         a.args = try std.process.argsAlloc(allocator);
-        if (a.args.len < 4) { stderr(help, .{}); return error.NotEnoughArguments; }
+        if (a.args.len < 4) { try stderr.writeAll(help); return error.NotEnoughArguments; }
         a.out = a.args[1];
         a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
-        if (a.name.len == 0) { stderr("empty name\n", .{}); return error.IncorrectArgument; }
+        if (a.name.len == 0) { dstderr("empty name\n", .{}); return error.IncorrectArgument; }
         a.count = try parseInt(u32, a.args[3]);
         a.seed = if (a.args.len > 4) try parseInt(u64, a.args[4]) else 0x0123456789abcdef;
         return a;
@@ -79,7 +79,7 @@ const Args = struct {
 
     fn parseInt(T: type, val: []const u8) !T {
         return std.fmt.parseInt(T, val, 10) catch |err| {
-            stderr("value: '{s}' failed to parse as a positive integer\n", .{val});
+            dstderr("value: '{s}' failed to parse as a positive integer\n", .{val});
             return err;
         };
     }
@@ -104,7 +104,7 @@ const Output = struct {
 
     pub fn init(self: *Output, allocator: mem.Allocator, args: Args) !void {
         self.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
-            stderr("cannot open output path '{s}'\n", .{args.out});
+            dstderr("cannot open output path '{s}'\n", .{args.out});
             return err;
         };
         for (0..count) |i| {
@@ -147,7 +147,7 @@ const Output = struct {
 
     /// Puts message both into info.txt file and stderr
     pub fn info(self: *Output, comptime fmt: []const u8, args: anytype) !void {
-        stderr(fmt, args);
+        dstderr(fmt, args);
         try self.writer[@intFromEnum(File.info_txt)].print(fmt, args);
     }
 
@@ -174,7 +174,7 @@ const Output = struct {
         const path = try mem.join(allocator, "-", &[_][]const u8{ name, suf });
         // the .exclusive = true is so we faile if the file already exist
         return outdir.createFile(path, .{ .exclusive = true }) catch |err| {
-            stderr("failed to create file: '{s}'\n", .{path});
+            dstderr("failed to create file: '{s}'\n", .{path});
             return err;
         };
     }
