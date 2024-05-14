@@ -2,9 +2,13 @@ Computer Enhance  Part 2 - Haversine
 www.computerenhance.com
 
 zig version: 0.12.0
-run like a script: ./generate-data.zig
-build release version: ./release.sh
-and execute optimized binary: ./generate-data
+https://ziglang.org/download/#release-0.12.0
 
-pass no arguments to the program to see help
+For debug runs just execute zig files like scripts:
 
+  $ ./generate-data.zig
+  $ ./parse-data.zig
+
+To build release version run ./release.sh
+
+Pass no arguments to the programs to see help.
