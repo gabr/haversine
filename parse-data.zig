@@ -146,17 +146,7 @@ fn JSON_Reader(comptime T: type) type {
 }
 
 fn parse(allocator: mem.Allocator, args: Args) !f64 {
-    const file_name = try mem.join(allocator, "-", &[_][]const u8{ args.name, "data.json" });
-    const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
-    const file = fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
-        error.FileNotFound => {
-            dstderr("file '{s}' not found\n", .{file_path});
-            return err;
-        },
-        else => return err,
-    };
-    defer file.close();
-    const stat = try file.stat();
+    const file = try openFile(allocator, args, "data.json"); defer file.close();
     const bufreader = io.bufferedReader(file.reader());
     var jsonr = JSON_Reader(@TypeOf(bufreader)).init(bufreader);
     try jsonr.nextObject();
@@ -167,7 +157,7 @@ fn parse(allocator: mem.Allocator, args: Args) !f64 {
     }
     var hsum: f64 = 0;
     var count: usize = 0;
-    for (0..stat.size) |_| {
+    while (true) {
         jsonr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
         _ = try jsonr.nextKey(); const x0 = try jsonr.nextFloat(); dstderr("{d}, ", .{x0});
         _ = try jsonr.nextKey(); const y0 = try jsonr.nextFloat(); dstderr("{d}, ", .{y0});
@@ -181,8 +171,23 @@ fn parse(allocator: mem.Allocator, args: Args) !f64 {
 }
 
 fn parseAndValidate(allocator: mem.Allocator, args: Args) !f64 {
-    _ = allocator;
-    _ = args;
+    const data_json_file = try openFile(allocator, args, "data.json"); defer data_json_file.close();
+    const hsin_json_file = try openFile(allocator, args, "hsin.json"); defer hsin_json_file.close();
+    const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
+    const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
+
     return error.NotImplemented;
+}
+
+fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
+    const file_name = try mem.join(allocator, "-", &[_][]const u8{ args.name, suf });
+    const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
+    return fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            dstderr("file '{s}' not found\n", .{file_path});
+            return err;
+        },
+        else => return err,
+    };
 }
 
