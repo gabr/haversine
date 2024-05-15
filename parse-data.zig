@@ -121,13 +121,12 @@ fn JSON_Reader(comptime T: type) type {
 
         pub fn nextFloat(self: *Self) !f64 {
             const Static = struct { var buf: [255]u8 = undefined; };
-            var b = try self.reader.readByte();
+            var b = try self.skipWhitespace();
             if (b != ':') {
                 dstderr("expected ':' but found '{c}' at {d} byte\n", .{ b, self.creader.bytes_read });
                 return error.JSONUnexpectedCharacter;
             }
-            b = try self.reader.readByte();
-            while (std.ascii.isWhitespace(b)) { b = try self.reader.readByte(); }
+            b = try self.skipWhitespace();
             var i: usize = 0;
             while (b == '-' or b == '.' or std.ascii.isDigit(b)) {
                 Static.buf[i] = b; i+= 1;
@@ -136,13 +135,27 @@ fn JSON_Reader(comptime T: type) type {
             const float_str = mem.trim(u8, Static.buf[0..i], " ");
             return try std.fmt.parseFloat(f64, float_str);
         }
+
+        /// returns first non whitespace byte
+        fn skipWhitespace(self: *Self) !u8 {
+            var b = try self.reader.readByte();
+            while (std.ascii.isWhitespace(b)) { b = try self.reader.readByte(); }
+            return b;
+        }
     };
 }
 
 fn parse(allocator: mem.Allocator, args: Args) !f64 {
     const file_name = try mem.join(allocator, "-", &[_][]const u8{ args.name, "data.json" });
     const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
-    const file = try fs.cwd().openFile(file_path, .{});
+    const file = fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            dstderr("file '{s}' not found\n", .{file_path});
+            return err;
+        },
+        else => return err,
+    };
+    defer file.close();
     const stat = try file.stat();
     const bufreader = io.bufferedReader(file.reader());
     var jsonr = JSON_Reader(@TypeOf(bufreader)).init(bufreader);
@@ -152,14 +165,19 @@ fn parse(allocator: mem.Allocator, args: Args) !f64 {
         dstderr("pairs key not found\n", .{});
         return error.JSONIncorrectFormat;
     }
+    var hsum: f64 = 0;
+    var count: usize = 0;
     for (0..stat.size) |_| {
         jsonr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
         _ = try jsonr.nextKey(); const x0 = try jsonr.nextFloat(); dstderr("{d}, ", .{x0});
         _ = try jsonr.nextKey(); const y0 = try jsonr.nextFloat(); dstderr("{d}, ", .{y0});
         _ = try jsonr.nextKey(); const x1 = try jsonr.nextFloat(); dstderr("{d}, ", .{x1});
         _ = try jsonr.nextKey(); const y1 = try jsonr.nextFloat(); dstderr("{d}\n", .{y1});
+        const hsin = haversine(x0, y0, x1, y1);
+        hsum += hsin;
+        count += 1;
     }
-    return 0;
+    return hsum / @as(f64, @floatFromInt(count));
 }
 
 fn parseAndValidate(allocator: mem.Allocator, args: Args) !f64 {
