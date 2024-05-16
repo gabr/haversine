@@ -66,9 +66,7 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
-    const result =
-        if (args.valid) try parseAndValidate(allocator, args)
-                   else try parse(allocator, args);
+    const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
 }
@@ -94,43 +92,44 @@ const Args = struct {
 /// Supply with the a Reader type
 fn JSON_Reader(comptime T: type) type {
     return struct {
-        creader: io.CountingReader(T),
-        reader:  io.CountingReader(T).Reader,
-
+        reader: io.CountingReader(T),
         const Self = @This();
 
         /// Pass the reader instance to read JSON from
         pub fn init(reader: T) Self {
-            var cr = io.countingReader(reader);
-            return .{
-                .creader = cr,
-                .reader  = cr.reader(),
-            };
+            return .{ .reader = io.countingReader(reader), };
+        }
+
+        pub fn getPos(self: *Self) u64 {
+            return self.reader.bytes_read;
         }
 
         /// Moves to the next {
         pub fn nextObject(self: *Self) !void {
-            while (try self.reader.readByte() != '{') {}
+            const r = self.reader.reader();
+            while (try r.readByte() != '{') {}
         }
 
         pub fn nextKey(self: *Self) ![]const u8 {
             const Static = struct { var buf: [255]u8 = undefined; };
-            while (try self.reader.readByte() != '"') {}
-            return try self.reader.readUntilDelimiter(&Static.buf, '"');
+            const r = self.reader.reader();
+            while (try r.readByte() != '"') {}
+            return try r.readUntilDelimiter(&Static.buf, '"');
         }
 
         pub fn nextFloat(self: *Self) !f64 {
             const Static = struct { var buf: [255]u8 = undefined; };
             var b = try self.skipWhitespace();
             if (b != ':') {
-                dstderr("expected ':' but found '{c}' at {d} byte\n", .{ b, self.creader.bytes_read });
+                dstderr("expected ':' but found '{c}' at {d} byte\n", .{ b, self.getPos() });
                 return error.JSONUnexpectedCharacter;
             }
             b = try self.skipWhitespace();
             var i: usize = 0;
-            while (b == '-' or b == '.' or std.ascii.isDigit(b)) {
+            const r = self.reader.reader();
+            while (b == '-' or b == '+' or b == '.' or std.ascii.isDigit(b)) {
                 Static.buf[i] = b; i+= 1;
-                b = try self.reader.readByte();
+                b = try r.readByte();
             }
             const float_str = mem.trim(u8, Static.buf[0..i], " ");
             return try std.fmt.parseFloat(f64, float_str);
@@ -138,88 +137,75 @@ fn JSON_Reader(comptime T: type) type {
 
         /// returns first non whitespace byte
         fn skipWhitespace(self: *Self) !u8 {
-            var b = try self.reader.readByte();
-            while (std.ascii.isWhitespace(b)) { b = try self.reader.readByte(); }
+            const r = self.reader.reader();
+            var b = try r.readByte();
+            while (std.ascii.isWhitespace(b)) { b = try r.readByte(); }
             return b;
         }
     };
 }
 
-const HaversineCalculator = struct {
-    buffr: BufReader,
-    jsonr: JSON_Reader(BufReader),
-    hsum:  f64,
-    count: u32,
+/// Supply with the a Reader type
+fn Float_Reader(comptime T: type) type {
+    return struct {
+        reader: T,
 
-    const BufReader = io.BufferedReader(4096, fs.File.Reader);
-    pub const Step = struct { lon1: f64, lat1: f64, lon2: f64, lat2: f64, hsin: f64, };
+        const Self = @This();
 
-    /// Initialize and start calculation
-    pub fn start(data_json_file: fs.File) !HaversineCalculator {
-        const buffr = io.bufferedReader(data_json_file.reader());
-        var jsonr = JSON_Reader(BufReader).init(buffr);
-        try jsonr.nextObject();
-        const pairs_key = try jsonr.nextKey();
-        if (!mem.eql(u8, pairs_key, "pairs")) {
-            dstderr("pairs key not found\n", .{});
-            return error.JSONIncorrectFormat;
+        /// Pass the reader instance to read floats from
+        pub fn init(reader: T) Self {
+            return .{ .reader = reader };
         }
-        return .{
-            .buffr = buffr,
-            .jsonr = jsonr,
-            .hsum  = 0,
-            .count = 0,
-        };
-    }
 
-    /// Read pair of points and calculate Haversine distance.
-    /// Returns data collected and calculated during the step.
-    /// If null is retuned it means end of data and
-    /// it's time to call the end() function.
-    pub fn step(self: *HaversineCalculator) !?Step {
-        self.jsonr.nextObject() catch |err| switch (err) {
-            error.EndOfStream => return null,
-            else => return err,
-        };
-        _ = try self.jsonr.nextKey(); const x0 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{x0});
-        _ = try self.jsonr.nextKey(); const y0 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{y0});
-        _ = try self.jsonr.nextKey(); const x1 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{x1});
-        _ = try self.jsonr.nextKey(); const y1 = try self.jsonr.nextFloat(); dstderr("{d}\n", .{y1});
-        const hsin = haversine(x0, y0, x1, y1);
-        self.hsum += hsin;
-        self.count += 1;
-        return .{
-             .lon1 = x0,
-             .lat1 = y0,
-             .lon2 = x1,
-             .lat2 = y1,
-             .hsin = hsin,
-        };
-    }
-
-    /// Call after step() returned null to get the Haversine distances averrage.
-    pub fn end(self: *HaversineCalculator) f64 {
-        return self.hsum / @as(f64, @floatFromInt(self.count));
-    }
-};
-
-fn parse(allocator: mem.Allocator, args: Args) !f64 {
-    const file = try openFile(allocator, args, "data.json"); defer file.close();
-    var hcalc = try HaversineCalculator.start(file);
-    while (try hcalc.step()) |_| {}
-    return hcalc.end();
+        // returns null when file ends
+        pub fn nextFloat(self: *Self) !?f64 {
+            var buf: [8]u8 = undefined;
+            self.reader.readNoEof(&buf) catch |err| switch (err) {
+                error.EndOfStream => return null,
+                else => return err,
+            };
+            return mem.bytesAsValue(f64, &buf).*;
+        }
+    };
 }
 
-fn parseAndValidate(allocator: mem.Allocator, args: Args) !f64 {
+fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const data_json_file = try openFile(allocator, args, "data.json"); defer data_json_file.close();
     const hsin_json_file = try openFile(allocator, args, "hsin.json"); defer hsin_json_file.close();
     const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
-    var hcalc = try HaversineCalculator.start(data_json_file);
-    while (try hcalc.step()) |step| {
-        _ = step;
+    const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
+    const bufjr = io.bufferedReader(data_json_file.reader());
+    var djr = JSON_Reader(@TypeOf(bufjr)).init(bufjr);
+    //var hjr = JSON_Reader(fs.File.Reader).init(hsin_json_file.reader());
+    var dfr = Float_Reader(fs.File.Reader).init(data_f64_file.reader());
+    try djr.nextObject();
+    const pairs_key = try djr.nextKey();
+    if (!mem.eql(u8, pairs_key, "pairs")) {
+        dstderr("pairs key not found\n", .{});
+        return error.JSONIncorrectFormat;
     }
-    return hcalc.end();
+    var hsum: f64 = 0;
+    var count: u32 = 0;
+    while (true) {
+        djr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
+        _ = try djr.nextKey(); const x0 = try djr.nextFloat(); const x0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x0pos, x0});
+        _ = try djr.nextKey(); const y0 = try djr.nextFloat(); const y0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{y0pos, y0});
+        _ = try djr.nextKey(); const x1 = try djr.nextFloat(); const x1pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x1pos, x1});
+        _ = try djr.nextKey(); const y1 = try djr.nextFloat(); const y1pos = djr.getPos(); dstderr("[{d}]: {d}\n", .{y1pos, y1});
+        const hsin = haversine(x0, y0, x1, y1);
+        hsum += hsin;
+        count += 1;
+        if (validate) {
+            const error_msg = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
+            const fx0 = (try dfr.nextFloat()).?; if (fx0 != x0) dstderr(error_msg, .{x0pos, fx0, x0});
+            const fy0 = (try dfr.nextFloat()).?; if (fy0 != y0) dstderr(error_msg, .{y0pos, fy0, y0});
+            const fx1 = (try dfr.nextFloat()).?; if (fx1 != x1) dstderr(error_msg, .{x1pos, fx1, x1});
+            const fy1 = (try dfr.nextFloat()).?; if (fy1 != y1) dstderr(error_msg, .{y1pos, fy1, y1});
+        }
+    }
+    const result = hsum / @as(f64, @floatFromInt(count));
+    return result;
 }
 
 fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
