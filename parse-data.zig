@@ -145,29 +145,69 @@ fn JSON_Reader(comptime T: type) type {
     };
 }
 
+const HaversineCalculator = struct {
+    buffr: BufReader,
+    jsonr: JSON_Reader(BufReader),
+    hsum:  f64,
+    count: u32,
+
+    const BufReader = io.BufferedReader(4096, fs.File.Reader);
+    pub const Step = struct { lon1: f64, lat1: f64, lon2: f64, lat2: f64, hsin: f64, };
+
+    /// Initialize and start calculation
+    pub fn start(data_json_file: fs.File) !HaversineCalculator {
+        const buffr = io.bufferedReader(data_json_file.reader());
+        var jsonr = JSON_Reader(BufReader).init(buffr);
+        try jsonr.nextObject();
+        const pairs_key = try jsonr.nextKey();
+        if (!mem.eql(u8, pairs_key, "pairs")) {
+            dstderr("pairs key not found\n", .{});
+            return error.JSONIncorrectFormat;
+        }
+        return .{
+            .buffr = buffr,
+            .jsonr = jsonr,
+            .hsum  = 0,
+            .count = 0,
+        };
+    }
+
+    /// Read pair of points and calculate Haversine distance.
+    /// Returns data collected and calculated during the step.
+    /// If null is retuned it means end of data and
+    /// it's time to call the end() function.
+    pub fn step(self: *HaversineCalculator) !?Step {
+        self.jsonr.nextObject() catch |err| switch (err) {
+            error.EndOfStream => return null,
+            else => return err,
+        };
+        _ = try self.jsonr.nextKey(); const x0 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{x0});
+        _ = try self.jsonr.nextKey(); const y0 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{y0});
+        _ = try self.jsonr.nextKey(); const x1 = try self.jsonr.nextFloat(); dstderr("{d}, ", .{x1});
+        _ = try self.jsonr.nextKey(); const y1 = try self.jsonr.nextFloat(); dstderr("{d}\n", .{y1});
+        const hsin = haversine(x0, y0, x1, y1);
+        self.hsum += hsin;
+        self.count += 1;
+        return .{
+             .lon1 = x0,
+             .lat1 = y0,
+             .lon2 = x1,
+             .lat2 = y1,
+             .hsin = hsin,
+        };
+    }
+
+    /// Call after step() returned null to get the Haversine distances averrage.
+    pub fn end(self: *HaversineCalculator) f64 {
+        return self.hsum / @as(f64, @floatFromInt(self.count));
+    }
+};
+
 fn parse(allocator: mem.Allocator, args: Args) !f64 {
     const file = try openFile(allocator, args, "data.json"); defer file.close();
-    const bufreader = io.bufferedReader(file.reader());
-    var jsonr = JSON_Reader(@TypeOf(bufreader)).init(bufreader);
-    try jsonr.nextObject();
-    const pairs_key = try jsonr.nextKey();
-    if (!mem.eql(u8, pairs_key, "pairs")) {
-        dstderr("pairs key not found\n", .{});
-        return error.JSONIncorrectFormat;
-    }
-    var hsum: f64 = 0;
-    var count: usize = 0;
-    while (true) {
-        jsonr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
-        _ = try jsonr.nextKey(); const x0 = try jsonr.nextFloat(); dstderr("{d}, ", .{x0});
-        _ = try jsonr.nextKey(); const y0 = try jsonr.nextFloat(); dstderr("{d}, ", .{y0});
-        _ = try jsonr.nextKey(); const x1 = try jsonr.nextFloat(); dstderr("{d}, ", .{x1});
-        _ = try jsonr.nextKey(); const y1 = try jsonr.nextFloat(); dstderr("{d}\n", .{y1});
-        const hsin = haversine(x0, y0, x1, y1);
-        hsum += hsin;
-        count += 1;
-    }
-    return hsum / @as(f64, @floatFromInt(count));
+    var hcalc = try HaversineCalculator.start(file);
+    while (try hcalc.step()) |_| {}
+    return hcalc.end();
 }
 
 fn parseAndValidate(allocator: mem.Allocator, args: Args) !f64 {
@@ -175,8 +215,11 @@ fn parseAndValidate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_json_file = try openFile(allocator, args, "hsin.json"); defer hsin_json_file.close();
     const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
-
-    return error.NotImplemented;
+    var hcalc = try HaversineCalculator.start(data_json_file);
+    while (try hcalc.step()) |step| {
+        _ = step;
+    }
+    return hcalc.end();
 }
 
 fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
