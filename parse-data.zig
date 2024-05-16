@@ -145,12 +145,9 @@ fn JSON_Reader(comptime T: type) type {
     };
 }
 
-fn nextFloat(reader: fs.File.Reader) !?f64 {
+fn nextFloat(reader: fs.File.Reader) !f64 {
     var buf: [8]u8 = undefined;
-    reader.readNoEof(&buf) catch |err| switch (err) {
-        error.EndOfStream => return null,
-        else => return err,
-    };
+    try reader.readNoEof(&buf);
     return mem.bytesAsValue(f64, &buf).*;
 }
 
@@ -183,10 +180,10 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
         count += 1;
         if (validate) {
             const error_msg = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
-            const fx0 = (try nextFloat(dfr)).?; if (fx0 != x0) dstderr(error_msg, .{x0pos, fx0, x0});
-            const fy0 = (try nextFloat(dfr)).?; if (fy0 != y0) dstderr(error_msg, .{y0pos, fy0, y0});
-            const fx1 = (try nextFloat(dfr)).?; if (fx1 != x1) dstderr(error_msg, .{x1pos, fx1, x1});
-            const fy1 = (try nextFloat(dfr)).?; if (fy1 != y1) dstderr(error_msg, .{y1pos, fy1, y1});
+            const fx0 = (try nextFloat(dfr)); if (fx0 != x0) dstderr(error_msg, .{x0pos, fx0, x0});
+            const fy0 = (try nextFloat(dfr)); if (fy0 != y0) dstderr(error_msg, .{y0pos, fy0, y0});
+            const fx1 = (try nextFloat(dfr)); if (fx1 != x1) dstderr(error_msg, .{x1pos, fx1, x1});
+            const fy1 = (try nextFloat(dfr)); if (fy1 != y1) dstderr(error_msg, .{y1pos, fy1, y1});
         }
     }
     const result = hsum / @as(f64, @floatFromInt(count));
