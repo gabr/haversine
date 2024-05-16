@@ -110,6 +110,12 @@ fn JSON_Reader(comptime T: type) type {
             while (try r.readByte() != '{') {}
         }
 
+        /// Moves to the next [
+        pub fn nextArray(self: *Self) !void {
+            const r = self.reader.reader();
+            while (try r.readByte() != '[') {}
+        }
+
         pub fn nextKey(self: *Self) ![]const u8 {
             const Static = struct { var buf: [255]u8 = undefined; };
             const r = self.reader.reader();
@@ -117,14 +123,10 @@ fn JSON_Reader(comptime T: type) type {
             return try r.readUntilDelimiter(&Static.buf, '"');
         }
 
-        pub fn nextFloat(self: *Self) !f64 {
+        pub fn nextNum(self: *Self) !f64 {
             const Static = struct { var buf: [255]u8 = undefined; };
             var b = try self.skipWhitespace();
-            if (b != ':') {
-                dstderr("expected ':' but found '{c}' at {d} byte\n", .{ b, self.getPos() });
-                return error.JSONUnexpectedCharacter;
-            }
-            b = try self.skipWhitespace();
+            if (b == ':') b = try self.skipWhitespace();
             var i: usize = 0;
             const r = self.reader.reader();
             while (b == '-' or b == '+' or b == '.' or std.ascii.isDigit(b)) {
@@ -158,32 +160,30 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
     const bufjr = io.bufferedReader(data_json_file.reader());
-    var djr = JSON_Reader(@TypeOf(bufjr)).init(bufjr);
-    //var hjr = JSON_Reader(fs.File.Reader).init(hsin_json_file.reader());
+    var djr = JSON_Reader(@TypeOf(bufjr)).init(bufjr); try djr.nextArray();
     const dfr = data_f64_file.reader();
-    try djr.nextObject();
-    const pairs_key = try djr.nextKey();
-    if (!mem.eql(u8, pairs_key, "pairs")) {
-        dstderr("pairs key not found\n", .{});
-        return error.JSONIncorrectFormat;
-    }
+    const hfr = hsin_f64_file.reader();
+    var hjr = JSON_Reader(fs.File.Reader).init(hsin_json_file.reader()); try hjr.nextArray();
     var hsum: f64 = 0;
     var count: u32 = 0;
     while (true) {
         djr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
-        _ = try djr.nextKey(); const x0 = try djr.nextFloat(); const x0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x0pos, x0});
-        _ = try djr.nextKey(); const y0 = try djr.nextFloat(); const y0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{y0pos, y0});
-        _ = try djr.nextKey(); const x1 = try djr.nextFloat(); const x1pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x1pos, x1});
-        _ = try djr.nextKey(); const y1 = try djr.nextFloat(); const y1pos = djr.getPos(); dstderr("[{d}]: {d}\n", .{y1pos, y1});
+        _ = try djr.nextKey(); const x0 = try djr.nextNum(); const x0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x0pos, x0});
+        _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{y0pos, y0});
+        _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x1pos, x1});
+        _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); dstderr("[{d}]: {d}\n", .{y1pos, y1});
         const hsin = haversine(x0, y0, x1, y1);
         hsum += hsin;
         count += 1;
         if (validate) {
-            const error_msg = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
-            const fx0 = (try nextFloat(dfr)); if (fx0 != x0) dstderr(error_msg, .{x0pos, fx0, x0});
-            const fy0 = (try nextFloat(dfr)); if (fy0 != y0) dstderr(error_msg, .{y0pos, fy0, y0});
-            const fx1 = (try nextFloat(dfr)); if (fx1 != x1) dstderr(error_msg, .{x1pos, fx1, x1});
-            const fy1 = (try nextFloat(dfr)); if (fy1 != y1) dstderr(error_msg, .{y1pos, fy1, y1});
+            const err1 = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
+            const fx0 = try nextFloat(dfr); if (fx0 != x0) dstderr(err1, .{x0pos, fx0, x0});
+            const fy0 = try nextFloat(dfr); if (fy0 != y0) dstderr(err1, .{y0pos, fy0, y0});
+            const fx1 = try nextFloat(dfr); if (fx1 != x1) dstderr(err1, .{x1pos, fx1, x1});
+            const fy1 = try nextFloat(dfr); if (fy1 != y1) dstderr(err1, .{y1pos, fy1, y1});
+            const err2 = "error: incorrect Haversine distance for pairs: [{d}; {d}] [{d}; {d}] (at {d} byte), expected: {d}, got: {d}\n";
+            const hsinj = try hjr.nextNum();  if (hsinj != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinj, hsin });
+            const hsinf = try nextFloat(hfr); if (hsinf != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinf, hsin });
         }
     }
     const result = hsum / @as(f64, @floatFromInt(count));
