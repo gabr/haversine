@@ -8,14 +8,38 @@ pub fn Profiler(comptime AreasEnum: type) type {
 
         const Self = @This();
         const areas_count = @typeInfo(AreasEnum).Enum.fields.len;
+        const AreaPercent = struct { area: AreasEnum, percent: f64, };
+
+        fn lessThan(_: void, lhs: AreaPercent, rhs: AreaPercent) bool {
+            return lhs.percent > rhs.percent;
+        }
 
         pub fn init() Self {
             return .{ .tinit = rdtsc() };
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
-            _ = self;
-            try writer.print("profiler summary:\n", .{});
+            var buf = std.io.bufferedWriter(writer);
+            const bufw = buf.writer();
+            var percents: [areas_count]AreaPercent = undefined;
+            const total: f64 = @floatFromInt(rdtsc() - self.tinit);
+            var rest: f64 = 100.0;
+            for (self.areas, 0..) |a, i| {
+                const f: f64 = @floatFromInt(a);
+                const p = (f*100.0)/total;
+                rest -= p;
+                percents[i] = .{
+                    .area = @enumFromInt(i),
+                    .percent = p,
+                };
+            }
+            std.mem.sort(AreaPercent, &percents, {}, lessThan);
+            try bufw.print("profiler summary:\n", .{});
+            for (percents) |p| {
+                try bufw.print("  {s}: {d:.2}%\n", .{@tagName(p.area), p.percent});
+            }
+            try bufw.print("  rest: {d:.2}%\n", .{rest});
+            try buf.flush();
         }
 
         pub inline fn start(self: *Self) void {
