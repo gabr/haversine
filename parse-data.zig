@@ -1,6 +1,4 @@
-///usr/bin/env zig run -fno-llvm -fno-lld -fno-error-tracing -freference-trace "$0" -- "$@"; exit
-// -fno-llvm           disables LLVM to have faster compile time
-// -fno-lld            disables LLD to have faster linking time
+///usr/bin/env zig run -fno-error-tracing -freference-trace "$0" -- "$@"; exit
 // -fno-error-tracing  print only simple error message on error
 const help =
 \\parse-data
@@ -58,6 +56,10 @@ const fs        = std.fs;
 const assert    = std.debug.assert;
 const mem       = std.mem;
 const haversine = @import("common.zig").haversine;
+const prof      = @import("prof.zig");
+
+const ProfArea = enum { args, io_open, io_read, json, float, calc, };
+var gprof: prof.Profiler(ProfArea) = undefined;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -65,10 +67,12 @@ pub fn main() !void {
     // Lack of arena.deinit() is intentional as there is no
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
+    gprof = prof.Profiler(ProfArea).init();
     const args = try Args.get(allocator);
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
+    try gprof.sum(io.getStdErr().writer());
 }
 
 const Args = struct {
@@ -78,10 +82,13 @@ const Args = struct {
     valid: bool,
 
     pub fn get(allocator: mem.Allocator) !Args {
+        gprof.start(); defer gprof.end(.args);
         var a: Args = undefined;
-        const stderr = io.getStdErr().writer();
         a.args = try std.process.argsAlloc(allocator);
-        if (a.args.len < 3) { try stderr.writeAll(help); return error.NotEnoughArguments; }
+        if (a.args.len < 3) {
+            try io.getStdErr().writer().writeAll(help);
+            return error.NotEnoughArguments;
+        }
         a.path = a.args[1];
         a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
         a.valid = if (a.args.len > 3 ) mem.eql(u8, "-valid", a.args[3]) else false;
@@ -92,31 +99,38 @@ const Args = struct {
 /// Supply with the a Reader type
 fn JSON_Reader(comptime T: type) type {
     return struct {
-        reader: io.CountingReader(T),
+        reader: prof.ProfiledReader(io.CountingReader(T), ProfArea, .io_read),
         const Self = @This();
 
         /// Pass the reader instance to read JSON from
         pub fn init(reader: T) Self {
-            return .{ .reader = io.countingReader(reader), };
+            gprof.start(); defer gprof.end(.json);
+            return .{ .reader = .{
+                .inner_reader = io.countingReader(reader),
+                .profiler = &gprof,
+            }, };
         }
 
         pub fn getPos(self: *Self) u64 {
-            return self.reader.bytes_read;
+            return self.reader.inner_reader.bytes_read;
         }
 
         /// Moves to the next {
         pub fn nextObject(self: *Self) !void {
+            gprof.start(); defer gprof.end(.json);
             const r = self.reader.reader();
             while (try r.readByte() != '{') {}
         }
 
         /// Moves to the next [
         pub fn nextArray(self: *Self) !void {
+            gprof.start(); defer gprof.end(.json);
             const r = self.reader.reader();
             while (try r.readByte() != '[') {}
         }
 
         pub fn nextKey(self: *Self) ![]const u8 {
+            gprof.start(); defer gprof.end(.json);
             const Static = struct { var buf: [255]u8 = undefined; };
             const r = self.reader.reader();
             while (try r.readByte() != '"') {}
@@ -124,6 +138,7 @@ fn JSON_Reader(comptime T: type) type {
         }
 
         pub fn nextNum(self: *Self) !f64 {
+            gprof.start(); defer gprof.end(.json);
             const Static = struct { var buf: [255]u8 = undefined; };
             var b = try self.skipWhitespace();
             if (b == ':') b = try self.skipWhitespace();
@@ -139,6 +154,7 @@ fn JSON_Reader(comptime T: type) type {
 
         /// returns first non whitespace byte
         fn skipWhitespace(self: *Self) !u8 {
+            gprof.start(); defer gprof.end(.json);
             const r = self.reader.reader();
             var b = try r.readByte();
             while (std.ascii.isWhitespace(b)) { b = try r.readByte(); }
@@ -148,6 +164,7 @@ fn JSON_Reader(comptime T: type) type {
 }
 
 fn nextFloat(reader: fs.File.Reader) !f64 {
+    gprof.start(); defer gprof.end(.float);
     var buf: [8]u8 = undefined;
     try reader.readNoEof(&buf);
     return mem.bytesAsValue(f64, &buf).*;
@@ -191,6 +208,7 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
 }
 
 fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
+    gprof.start(); defer gprof.end(.io_open);
     const file_name = try mem.join(allocator, "-", &[_][]const u8{ args.name, suf });
     const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
     return fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
