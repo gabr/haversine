@@ -2,11 +2,13 @@ const std = @import("std");
 
 pub fn Profiler(comptime AreasEnum: type) type {
     return struct {
-        tinit:  u64,
-        tstart: u64 = 0,
+        tinit:  u64 = 0,
+        tstart_i: usize = 0,
+        tstart_stack: [stack_size]u64 = undefined,
         areas: [areas_count]u64 = [_]u64{0} ** areas_count,
 
         const Self = @This();
+        const stack_size = 1024*1024;
         const areas_count = @typeInfo(AreasEnum).Enum.fields.len;
         const AreaPercent = struct { area: AreasEnum, percent: f64, };
 
@@ -14,8 +16,8 @@ pub fn Profiler(comptime AreasEnum: type) type {
             return lhs.percent > rhs.percent;
         }
 
-        pub fn init() Self {
-            return .{ .tinit = rdtsc() };
+        pub fn init(self: *Self) void {
+            self.tinit = rdtsc();
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
@@ -38,16 +40,20 @@ pub fn Profiler(comptime AreasEnum: type) type {
             for (percents) |p| {
                 try bufw.print("  {s}: {d:.2}%\n", .{@tagName(p.area), p.percent});
             }
-            try bufw.print("  rest: {d:.2}%\n", .{rest});
+            try bufw.print("  -------------\n", .{});
+            try bufw.print("  unmeasured: {d:.2}%\n", .{rest});
             try buf.flush();
         }
 
         pub inline fn start(self: *Self) void {
-            self.tstart = rdtsc();
+            self.tstart_stack[self.tstart_i] = rdtsc();
+            self.tstart_i += 1;
         }
 
         pub inline fn end(self: *Self, area: AreasEnum) void {
-            self.areas[@intFromEnum(area)] += rdtsc() - self.tstart;
+            self.tstart_i -= 1;
+            const ts = self.tstart_stack[self.tstart_i];
+            self.areas[@intFromEnum(area)] += rdtsc() - ts;
         }
     };
 }

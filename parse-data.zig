@@ -59,7 +59,7 @@ const haversine = @import("common.zig").haversine;
 const prof      = @import("prof.zig");
 
 const ProfArea = enum { args, io_open, io_read, json, float, calc, };
-var gprof: prof.Profiler(ProfArea) = undefined;
+var gprof: prof.Profiler(ProfArea) = .{};
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -67,12 +67,12 @@ pub fn main() !void {
     // Lack of arena.deinit() is intentional as there is no
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
-    gprof = prof.Profiler(ProfArea).init();
+    gprof.init();
     const args = try Args.get(allocator);
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
-    try gprof.sum(io.getStdErr().writer());
+    try gprof.sum(stdout);
 }
 
 const Args = struct {
@@ -189,8 +189,10 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
         _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{y0pos, y0});
         _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x1pos, x1});
         _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); dstderr("[{d}]: {d}\n", .{y1pos, y1});
+        gprof.start();
         const hsin = haversine(x0, y0, x1, y1);
         hsum += hsin;
+        gprof.end(.calc);
         count += 1;
         if (validate) {
             const err1 = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
@@ -203,7 +205,9 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
             const hsinf = try nextFloat(hfr); if (hsinf != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinf, hsin });
         }
     }
+    gprof.start();
     const result = hsum / @as(f64, @floatFromInt(count));
+    gprof.end(.calc);
     return result;
 }
 
