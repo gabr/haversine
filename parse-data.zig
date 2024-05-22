@@ -60,7 +60,7 @@ const mem       = std.mem;
 const haversine = @import("common.zig").haversine;
 const prof      = @import("prof.zig");
 
-const ProfArea = enum { args, io_open, io_read_json, io_read_float, json, float, calc, alloc };
+const ProfArea = enum { args, io_open, io_read_json, io_read_float, json_buffer, json, float_buffer, float, calc, alloc };
 var gprof: prof.Profiler(ProfArea) = .{};
 
 pub fn main() !void {
@@ -194,10 +194,10 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
     const bufsiz = 4096;
-    const JsonBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .json, .io_read_json);
+    const JsonBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .json_buffer, .io_read_json);
     const bufdjr: JsonBufType = .{ .inner_reader = data_json_file.reader(), .profiler = &gprof, };
     var djr = JSON_Reader(@TypeOf(bufdjr)).init(bufdjr); try djr.nextArray();
-    const FloatBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .float, .io_read_float);
+    const FloatBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .float_buffer, .io_read_float);
     var profdfr: FloatBufType = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
     var profhfr: FloatBufType = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
     const dfr = profdfr.reader();
