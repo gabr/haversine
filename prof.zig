@@ -66,7 +66,7 @@ pub fn Profiler(comptime AreasEnum: type) type {
             }
             try bufw.print("  ------------------------------------\n", .{});
             try bufw.print("  total cycles: {d}\n",         .{total_cycles});
-            try bufw.print("  total wall time: {d:.4}ms ({d:.2})s\n", .{total_ms, total_ms/std.time.ms_per_s});
+            try bufw.print("  total wall time: {d:.4}ms ({d:.2}s)\n", .{total_ms, total_ms/std.time.ms_per_s});
             try bufw.print("  ------------------------------------\n", .{});
             try buf.flush();
         }
