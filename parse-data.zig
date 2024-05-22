@@ -8,7 +8,7 @@ const help =
 \\  (extension .f64) with the same floating point values as in the JSON.
 \\
 \\Usage:
-\\  parse-data path name [-valid]
+\\  parse-data path name [-valid] [-prof]
 \\
 \\    path    <string>  Path to the directory with JSON and f64 files
 \\    name    <string>  Prefix name of the files in given path
