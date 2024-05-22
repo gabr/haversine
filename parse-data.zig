@@ -58,21 +58,23 @@ const mem       = std.mem;
 const haversine = @import("common.zig").haversine;
 const prof      = @import("prof.zig");
 
-const ProfArea = enum { args, io_open, io_read, json, float, calc, };
+const ProfArea = enum { args, io_open, io_read_json, io_read_float, json, float, calc, alloc };
 var gprof: prof.Profiler(ProfArea) = .{};
 
 pub fn main() !void {
+    gprof.init();
+    gprof.start(.alloc);
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
+    gprof.end(.alloc);
     // Lack of arena.deinit() is intentional as there is no
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
-    gprof.init();
     const args = try Args.get(allocator);
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
-    try gprof.sum(stdout);
+    try gprof.sum(io.getStdErr().writer());
 }
 
 const Args = struct {
@@ -82,7 +84,7 @@ const Args = struct {
     valid: bool,
 
     pub fn get(allocator: mem.Allocator) !Args {
-        gprof.start(); defer gprof.end(.args);
+        gprof.start(.args); defer gprof.end(.args);
         var a: Args = undefined;
         a.args = try std.process.argsAlloc(allocator);
         if (a.args.len < 3) {
@@ -99,12 +101,12 @@ const Args = struct {
 /// Supply with the a Reader type
 fn JSON_Reader(comptime T: type) type {
     return struct {
-        reader: prof.ProfiledReader(io.CountingReader(T), ProfArea, .io_read),
+        reader: prof.ProfiledReader(io.CountingReader(T), ProfArea, .io_read_json),
         const Self = @This();
 
         /// Pass the reader instance to read JSON from
         pub fn init(reader: T) Self {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             return .{ .reader = .{
                 .inner_reader = io.countingReader(reader),
                 .profiler = &gprof,
@@ -117,20 +119,20 @@ fn JSON_Reader(comptime T: type) type {
 
         /// Moves to the next {
         pub fn nextObject(self: *Self) !void {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             const r = self.reader.reader();
             while (try r.readByte() != '{') {}
         }
 
         /// Moves to the next [
         pub fn nextArray(self: *Self) !void {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             const r = self.reader.reader();
             while (try r.readByte() != '[') {}
         }
 
         pub fn nextKey(self: *Self) ![]const u8 {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             const Static = struct { var buf: [255]u8 = undefined; };
             const r = self.reader.reader();
             while (try r.readByte() != '"') {}
@@ -138,7 +140,7 @@ fn JSON_Reader(comptime T: type) type {
         }
 
         pub fn nextNum(self: *Self) !f64 {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             const Static = struct { var buf: [255]u8 = undefined; };
             var b = try self.skipWhitespace();
             if (b == ':') b = try self.skipWhitespace();
@@ -154,20 +156,13 @@ fn JSON_Reader(comptime T: type) type {
 
         /// returns first non whitespace byte
         fn skipWhitespace(self: *Self) !u8 {
-            gprof.start(); defer gprof.end(.json);
+            gprof.start(.json); defer gprof.end(.json);
             const r = self.reader.reader();
             var b = try r.readByte();
             while (std.ascii.isWhitespace(b)) { b = try r.readByte(); }
             return b;
         }
     };
-}
-
-fn nextFloat(reader: anytype) !f64 {
-    gprof.start(); defer gprof.end(.float);
-    var buf: [8]u8 = undefined;
-    try reader.readNoEof(&buf);
-    return mem.bytesAsValue(f64, &buf).*;
 }
 
 fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
@@ -177,13 +172,9 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
     const bufjr = io.bufferedReader(data_json_file.reader());
-    const profbufjr: prof.ProfiledReader(@TypeOf(bufjr), ProfArea, .io_read) = .{
-        .inner_reader = bufjr,
-        .profiler = &gprof,
-    };
-    var djr = JSON_Reader(@TypeOf(profbufjr)).init(profbufjr); try djr.nextArray();
-    var profdfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read) = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
-    var profhfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read) = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
+    var djr = JSON_Reader(@TypeOf(bufjr)).init(bufjr); try djr.nextArray();
+    var profdfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read_float) = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
+    var profhfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read_float) = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
     const dfr = profdfr.reader();
     const hfr = profhfr.reader();
     var hjr = JSON_Reader(fs.File.Reader).init(hsin_json_file.reader()); try hjr.nextArray();
@@ -191,11 +182,11 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     var count: u32 = 0;
     while (true) {
         djr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
-        _ = try djr.nextKey(); const x0 = try djr.nextNum(); const x0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x0pos, x0});
-        _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{y0pos, y0});
-        _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); dstderr("[{d}]: {d}, ", .{x1pos, x1});
-        _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); dstderr("[{d}]: {d}\n", .{y1pos, y1});
-        gprof.start();
+        _ = try djr.nextKey(); const x0 = try djr.nextNum(); const x0pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{x0pos, x0});
+        _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{y0pos, y0});
+        _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{x1pos, x1});
+        _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); //dstderr("[{d}]: {d}\n", .{y1pos, y1});
+        gprof.start(.calc);
         const hsin = haversine(x0, y0, x1, y1);
         hsum += hsin;
         gprof.end(.calc);
@@ -211,14 +202,14 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
             const hsinf = try nextFloat(hfr); if (hsinf != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinf, hsin });
         }
     }
-    gprof.start();
+    gprof.start(.calc);
     const result = hsum / @as(f64, @floatFromInt(count));
     gprof.end(.calc);
     return result;
 }
 
 fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
-    gprof.start(); defer gprof.end(.io_open);
+    gprof.start(.io_open); defer gprof.end(.io_open);
     const file_name = try mem.join(allocator, "-", &[_][]const u8{ args.name, suf });
     const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
     return fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
@@ -228,5 +219,12 @@ fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
         },
         else => return err,
     };
+}
+
+fn nextFloat(reader: anytype) !f64 {
+    gprof.start(.float); defer gprof.end(.float);
+    var buf: [8]u8 = undefined;
+    try reader.readNoEof(&buf);
+    return mem.bytesAsValue(f64, &buf).*;
 }
 

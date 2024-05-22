@@ -2,58 +2,65 @@ const std = @import("std");
 
 pub fn Profiler(comptime AreasEnum: type) type {
     return struct {
-        tinit:  u64 = 0,
-        tstart_i: usize = 0,
-        tstart_stack: [stack_size]u64 = undefined,
-        areas: [areas_count]u64 = [_]u64{0} ** areas_count,
+        init_time:   u64 = 0,
+        areas_sums:  [areas_count]u64 = [_]u64{0} ** areas_count,
+        areas_start: [areas_count]u64 = [_]u64{0} ** areas_count,
+        areas_count: [areas_count]u64 = [_]u64{0} ** areas_count,
 
         const Self = @This();
-        const stack_size = 1024*1024;
         const areas_count = @typeInfo(AreasEnum).Enum.fields.len;
-        const AreaPercent = struct { area: AreasEnum, percent: f64, };
+        const AreaPercent = struct {
+            area:    AreasEnum,
+            percent: f64,
+            cycles:  u64,
 
-        fn lessThan(_: void, lhs: AreaPercent, rhs: AreaPercent) bool {
-            return lhs.percent > rhs.percent;
-        }
+            pub fn lessThan(_: void, lhs: AreaPercent, rhs: AreaPercent) bool {
+                return lhs.percent > rhs.percent;
+            }
+        };
 
         pub fn init(self: *Self) void {
-            self.tinit = rdtsc();
+            self.init_time = rdtsc();
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
             var buf = std.io.bufferedWriter(writer);
             const bufw = buf.writer();
             var percents: [areas_count]AreaPercent = undefined;
-            const total: f64 = @floatFromInt(rdtsc() - self.tinit);
-            var rest: f64 = 100.0;
-            for (self.areas, 0..) |a, i| {
+            const total: f64 = @floatFromInt(rdtsc() - self.init_time);
+            for (self.areas_sums, 0..) |a, i| {
                 const f: f64 = @floatFromInt(a);
                 const p = (f*100.0)/total;
-                rest -= p;
                 percents[i] = .{
                     .area = @enumFromInt(i),
                     .percent = p,
+                    .cycles = a,
                 };
             }
-            std.mem.sort(AreaPercent, &percents, {}, lessThan);
+            std.mem.sort(AreaPercent, &percents, {}, AreaPercent.lessThan);
             try bufw.print("profiler summary:\n", .{});
             for (percents) |p| {
-                try bufw.print("  {s}: {d:.2}%\n", .{@tagName(p.area), p.percent});
+                try bufw.print("  {s}: {d:.4}% [cycles: {d}]\n", .{@tagName(p.area), p.percent, p.cycles});
             }
-            try bufw.print("  -------------\n", .{});
-            try bufw.print("  unmeasured: {d:.2}%\n", .{rest});
             try buf.flush();
         }
 
-        pub inline fn start(self: *Self) void {
-            self.tstart_stack[self.tstart_i] = rdtsc();
-            self.tstart_i += 1;
+        pub inline fn start(self: *Self, area: AreasEnum) void {
+            const i = @intFromEnum(area);
+            if (self.areas_start[i] == 0) {
+                self.areas_start[i] = rdtsc();
+            }
+            self.areas_count[i] += 1;
         }
 
         pub inline fn end(self: *Self, area: AreasEnum) void {
-            self.tstart_i -= 1;
-            const ts = self.tstart_stack[self.tstart_i];
-            self.areas[@intFromEnum(area)] += rdtsc() - ts;
+            const i = @intFromEnum(area);
+            std.debug.assert(self.areas_count[i] > 0);
+            self.areas_count[i] -= 1;
+            if (self.areas_count[i] == 0) {
+                self.areas_sums[i] += rdtsc() - self.areas_start[i];
+                self.areas_start[i] = 0;
+            }
         }
     };
 }
@@ -73,7 +80,7 @@ pub fn ProfiledReader(
         const Self = @This();
 
         pub fn read(self: *Self, dest: []u8) Error!usize {
-            self.profiler.start(); defer self.profiler.end(area);
+            self.profiler.start(area); defer self.profiler.end(area);
             return try self.inner_reader.read(dest);
         }
 
