@@ -127,20 +127,16 @@ const Args = struct {
 /// Supply with the a Reader type
 fn JSON_Reader(comptime T: type) type {
     return struct {
-        reader: prof.ProfiledReader(io.CountingReader(T), ProfArea, .io_read_json),
+        reader: io.CountingReader(T),
         const Self = @This();
 
         /// Pass the reader instance to read JSON from
         pub fn init(reader: T) Self {
-            gprof.start(.json); defer gprof.end(.json);
-            return .{ .reader = .{
-                .inner_reader = io.countingReader(reader),
-                .profiler = &gprof,
-            }, };
+            return .{ .reader = io.countingReader(reader) };
         }
 
         pub fn getPos(self: *Self) u64 {
-            return self.reader.inner_reader.bytes_read;
+            return self.reader.bytes_read;
         }
 
         /// Moves to the next {
@@ -197,13 +193,17 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
-    const bufjr = io.bufferedReader(data_json_file.reader());
-    var djr = JSON_Reader(@TypeOf(bufjr)).init(bufjr); try djr.nextArray();
-    var profdfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read_float) = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
-    var profhfr: prof.ProfiledReader(fs.File.Reader, ProfArea, .io_read_float) = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
+    const bufsiz = 4096;
+    const JsonBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .json, .io_read_json);
+    const bufdjr: JsonBufType = .{ .inner_reader = data_json_file.reader(), .profiler = &gprof, };
+    var djr = JSON_Reader(@TypeOf(bufdjr)).init(bufdjr); try djr.nextArray();
+    const FloatBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .float, .io_read_float);
+    var profdfr: FloatBufType = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
+    var profhfr: FloatBufType = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
     const dfr = profdfr.reader();
     const hfr = profhfr.reader();
-    var hjr = JSON_Reader(fs.File.Reader).init(hsin_json_file.reader()); try hjr.nextArray();
+    const bufhjr: JsonBufType = .{ .inner_reader = hsin_json_file.reader(), .profiler = &gprof, };
+    var hjr = JSON_Reader(@TypeOf(bufhjr)).init(bufhjr); try hjr.nextArray();
     var hsum: f64 = 0;
     var count: u32 = 0;
     while (true) {

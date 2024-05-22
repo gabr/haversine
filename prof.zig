@@ -118,6 +118,59 @@ pub fn ProfiledReader(
     };
 }
 
+pub fn ProfiledBufferedReader(
+    comptime buffer_size:   usize,
+    comptime ReaderType:    type,
+    comptime AreasEnum:     type,
+    comptime buffered_area: AreasEnum,
+    comptime io_area:       AreasEnum,
+) type {
+    return struct {
+        inner_reader: ReaderType,
+        profiler: *Profiler(AreasEnum),
+        buf: [buffer_size]u8 = undefined,
+        start: usize = 0,
+        end: usize = 0,
+
+        pub const Error = ReaderType.Error;
+        pub const Reader = std.io.Reader(*Self, Error, read);
+
+        const Self = @This();
+
+        pub fn read(self: *Self, dest: []u8) Error!usize {
+            self.profiler.start(buffered_area); defer self.profiler.end(buffered_area);
+            var dest_index: usize = 0;
+
+            while (dest_index < dest.len) {
+                const written = @min(dest.len - dest_index, self.end - self.start);
+                @memcpy(dest[dest_index..][0..written], self.buf[self.start..][0..written]);
+                if (written == 0) {
+                    // buf empty, fill it
+                    self.profiler.end(buffered_area);
+                    self.profiler.start(io_area);
+                    const n = try self.inner_reader.read(self.buf[0..]);
+                    self.profiler.end(io_area);
+                    self.profiler.start(buffered_area);
+                    if (n == 0) {
+                        // reading from the inner stream returned nothing
+                        // so we have nothing left to read.
+                        return dest_index;
+                    }
+                    self.start = 0;
+                    self.end = n;
+                }
+                self.start += written;
+                dest_index += written;
+            }
+            return dest.len;
+        }
+
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+    };
+}
+
 /// read CPU clocks
 inline fn rdtsc() u64 {
     // https://www.felixcloutier.com/x86/rdtsc
