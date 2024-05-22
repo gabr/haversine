@@ -74,6 +74,7 @@ pub fn main() !void {
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
     gprof.enabled = args.prof;
+    if (args.prof) dstderr("profiler enabled\n", .{});
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
