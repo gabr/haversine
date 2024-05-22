@@ -15,6 +15,8 @@ const help =
 \\    -valid  <flag>    Optional flag.  If present program will validate
 \\                      JSON data and calculations using f64 files.
 \\                      Errors will be printed to the standard error.
+\\    -prof   <flag>    Optional flag.  If present the program will output
+\\                      profiler data to standard error.
 \\
 \\The output of the program is a single float value which is an averrage
 \\of all Haversine distances from all the pairs in given JSON data file.
@@ -71,29 +73,52 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
+    gprof.enabled = args.prof;
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
-    try gprof.sum(io.getStdErr().writer());
+    if (args.prof) try gprof.sum(io.getStdErr().writer());
 }
 
 const Args = struct {
     args:  [][:0]u8,
-    path:  []const u8,
-    name:  []const u8,
-    valid: bool,
+    path:  []const u8 = "",
+    name:  []const u8 = "",
+    valid: bool = false,
+    prof:  bool = false,
 
+    /// Extracts command line arguments allowing for flags
+    /// to be anywhere mixed up with positional arguments.
     pub fn get(allocator: mem.Allocator) !Args {
         gprof.start(.args); defer gprof.end(.args);
-        var a: Args = undefined;
-        a.args = try std.process.argsAlloc(allocator);
+        const stderr = io.getStdErr().writer();
+        var a: Args = .{ .args = try std.process.argsAlloc(allocator) };
         if (a.args.len < 3) {
-            try io.getStdErr().writer().writeAll(help);
+            try stderr.writeAll(help);
             return error.NotEnoughArguments;
         }
-        a.path = a.args[1];
-        a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
-        a.valid = if (a.args.len > 3 ) mem.eql(u8, "-valid", a.args[3]) else false;
+        var i: u8 = 0;
+        for (a.args) |arg| {
+            if (arg[0] == '-') { // handle flags
+                     if (mem.eql(u8, "-valid", arg)) { a.valid = true; }
+                else if (mem.eql(u8, "-prof",  arg)) { a.prof  = true; }
+                else {
+                    try stderr.print("unknown flag: '{s}'\n", .{arg});
+                    return error.UnknownFlag;
+                }
+                continue;
+            }
+            switch (i) { // handle positional args
+                0 => {}, // that's the executable path, we skipp this one
+                1 => a.path = arg,
+                2 => a.name = mem.trim(u8, arg, " \t\n\r "), // the last one is hard space
+                else => {
+                    try stderr.print("too many positional arguments, excess one: '{s}'\n", .{arg});
+                    return error.TooManyArguments;
+                },
+            }
+            i += 1;
+        }
         return a;
     }
 };

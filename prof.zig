@@ -4,6 +4,7 @@ pub fn Profiler(comptime AreasEnum: type) type {
     return struct {
         init_cycles:   u64  = 0,
         init_os_time:  i128 = 0,
+        enabled:       bool = true,
         areas_sums:    [areas_count]u64 = [_]u64{0} ** areas_count,
         areas_start:   [areas_count]u64 = [_]u64{0} ** areas_count,
         areas_count:   [areas_count]u64 = [_]u64{0} ** areas_count,
@@ -71,6 +72,7 @@ pub fn Profiler(comptime AreasEnum: type) type {
         }
 
         pub inline fn start(self: *Self, area: AreasEnum) void {
+            if (!self.enabled) return;
             const i = @intFromEnum(area);
             if (self.areas_start[i] == 0) {
                 self.areas_start[i] = rdtsc();
@@ -79,6 +81,7 @@ pub fn Profiler(comptime AreasEnum: type) type {
         }
 
         pub inline fn end(self: *Self, area: AreasEnum) void {
+            if (!self.enabled) return;
             const i = @intFromEnum(area);
             std.debug.assert(self.areas_count[i] > 0);
             self.areas_count[i] -= 1;
