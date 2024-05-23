@@ -1,7 +1,17 @@
 const std = @import("std");
 const expect = std.testing.expect;
 
-pub fn Profiler(comptime AreasEnum: type) type {
+pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
+    // if profiler is disabled return a dummy struct
+    if (!enable) {
+        return struct {
+            const Self = @This();
+            pub inline fn init (self: *Self)                   void { _ = self; }
+            pub inline fn sum  (self: *Self, writer: anytype) !void { _ = self; _ = writer; }
+            pub inline fn start(self: *Self, area: AreasEnum)  void { _ = self; _ = area;   }
+            pub inline fn end  (self: *Self, area: AreasEnum)  void { _ = self; _ = area;   }
+        };
+    }
     return struct {
         init_cycles:   u64  = 0,
         init_os_time:  i128 = 0,
@@ -95,13 +105,14 @@ pub fn Profiler(comptime AreasEnum: type) type {
 }
 
 pub fn ProfiledReader(
+    comptime enabled:    bool,
     comptime ReaderType: type,
-    comptime AreasEnum: type,
+    comptime AreasEnum:  type,
     area: AreasEnum,
 ) type {
     return struct {
         inner_reader: ReaderType,
-        profiler: *Profiler(AreasEnum),
+        profiler: *Profiler(enabled, AreasEnum),
 
         pub const Error = ReaderType.Error;
         pub const Reader = std.io.Reader(*Self, Error, read);
@@ -120,15 +131,17 @@ pub fn ProfiledReader(
 }
 
 pub fn ProfiledBufferedReader(
+    comptime enabled:       bool,
     comptime buffer_size:   usize,
     comptime ReaderType:    type,
     comptime AreasEnum:     type,
-    comptime buffered_area: AreasEnum,
+    // this one was causing too much of an overhead
+    //comptime buffered_area: AreasEnum,
     comptime io_area:       AreasEnum,
 ) type {
     return struct {
         inner_reader: ReaderType,
-        profiler: *Profiler(AreasEnum),
+        profiler: *Profiler(enabled, AreasEnum),
         buf: [buffer_size]u8 = undefined,
         start: usize = 0,
         end: usize = 0,
@@ -139,19 +152,19 @@ pub fn ProfiledBufferedReader(
         const Self = @This();
 
         pub fn read(self: *Self, dest: []u8) Error!usize {
-            self.profiler.start(buffered_area); defer self.profiler.end(buffered_area);
+            // see comment about buffered_area in function params
+            //self.profiler.start(buffered_area); defer self.profiler.end(buffered_area);
             var dest_index: usize = 0;
 
             while (dest_index < dest.len) {
                 const written = @min(dest.len - dest_index, self.end - self.start);
                 @memcpy(dest[dest_index..][0..written], self.buf[self.start..][0..written]);
-                if (written == 0) {
-                    // buf empty, fill it
-                    self.profiler.end(buffered_area);
+                if (written == 0) { // buf empty, fill it
+                    //self.profiler.end(buffered_area); // see comment about buffered_area in function params
                     self.profiler.start(io_area);
                     const n = try self.inner_reader.read(self.buf[0..]);
                     self.profiler.end(io_area);
-                    self.profiler.start(buffered_area);
+                    //self.profiler.start(buffered_area); // see comment about buffered_area in function params
                     if (n == 0) {
                         // reading from the inner stream returned nothing
                         // so we have nothing left to read.

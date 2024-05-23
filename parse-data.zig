@@ -8,15 +8,13 @@ const help =
 \\  (extension .f64) with the same floating point values as in the JSON.
 \\
 \\Usage:
-\\  parse-data path name [-valid] [-prof]
+\\  parse-data path name [-valid]
 \\
 \\    path    <string>  Path to the directory with JSON and f64 files
 \\    name    <string>  Prefix name of the files in given path
 \\    -valid  <flag>    Optional flag.  If present program will validate
 \\                      JSON data and calculations using f64 files.
 \\                      Errors will be printed to the standard error.
-\\    -prof   <flag>    Optional flag.  If present the program will output
-\\                      profiler data to standard error.
 \\
 \\The output of the program is a single float value which is an averrage
 \\of all Haversine distances from all the pairs in given JSON data file.
@@ -60,8 +58,9 @@ const mem       = std.mem;
 const haversine = @import("common.zig").haversine;
 const prof      = @import("prof.zig");
 
-const ProfArea = enum { args, io_open, io_read_json, io_read_float, json_buffer, json, float_buffer, float, calc, alloc };
-var gprof: prof.Profiler(ProfArea) = .{};
+const profEnabled = true;
+const ProfArea = enum { args, io_open, io_read_json, io_read_float, json, float, calc, alloc };
+var gprof: prof.Profiler(profEnabled, ProfArea) = .{};
 
 pub fn main() !void {
     gprof.init();
@@ -73,12 +72,11 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
-    gprof.enabled = args.prof;
-    if (args.prof) dstderr("profiler enabled\n", .{});
+    if (profEnabled) dstderr("profiler enabled\n", .{});
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
-    if (args.prof) try gprof.sum(io.getStdErr().writer());
+    try gprof.sum(io.getStdErr().writer());
 }
 
 const Args = struct {
@@ -86,7 +84,6 @@ const Args = struct {
     path:  []const u8 = "",
     name:  []const u8 = "",
     valid: bool = false,
-    prof:  bool = false,
 
     /// Extracts command line arguments allowing for flags
     /// to be anywhere mixed up with positional arguments.
@@ -102,7 +99,6 @@ const Args = struct {
         for (a.args) |arg| {
             if (arg[0] == '-') { // handle flags
                      if (mem.eql(u8, "-valid", arg)) { a.valid = true; }
-                else if (mem.eql(u8, "-prof",  arg)) { a.prof  = true; }
                 else {
                     try stderr.print("unknown flag: '{s}'\n", .{arg});
                     return error.UnknownFlag;
@@ -194,10 +190,10 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
     const bufsiz = 4096;
-    const JsonBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .json_buffer, .io_read_json);
+    const JsonBufType = prof.ProfiledBufferedReader(profEnabled, bufsiz, fs.File.Reader, ProfArea, .io_read_json);
     const bufdjr: JsonBufType = .{ .inner_reader = data_json_file.reader(), .profiler = &gprof, };
     var djr = JSON_Reader(@TypeOf(bufdjr)).init(bufdjr); try djr.nextArray();
-    const FloatBufType = prof.ProfiledBufferedReader(bufsiz, fs.File.Reader, ProfArea, .float_buffer, .io_read_float);
+    const FloatBufType = prof.ProfiledBufferedReader(profEnabled, bufsiz, fs.File.Reader, ProfArea, .io_read_float);
     var profdfr: FloatBufType = .{ .inner_reader = data_f64_file.reader(), .profiler = &gprof, };
     var profhfr: FloatBufType = .{ .inner_reader = hsin_f64_file.reader(), .profiler = &gprof, };
     const dfr = profdfr.reader();
