@@ -1,4 +1,5 @@
 const std = @import("std");
+const expect = std.testing.expect;
 
 pub fn Profiler(comptime AreasEnum: type) type {
     return struct {
@@ -184,4 +185,8 @@ inline fn rdtsc() u64 {
         : "rax", "rdx");
 }
 
-
+test {
+    const t1 = rdtsc(); try expect(t1 > 0);
+    const t2 = rdtsc(); try expect(t2 > 0);
+    try expect(t1 < t2);
+}

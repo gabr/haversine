@@ -3,3 +3,4 @@ generate-data
 generate-data.o
 parse-data
 parse-data.o
+test.*
