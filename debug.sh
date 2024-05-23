@@ -26,5 +26,5 @@ debug-test() {
 }
 
 #debug "generate-data"
-#debug "parse-data" data three -valid -prof
-debug-test prof
+debug "parse-data" data three -valid -prof
+#debug-test prof
