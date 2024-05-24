@@ -91,6 +91,7 @@ const Args = struct {
         gprof.start(.args); defer gprof.end(.args);
         const stderr = io.getStdErr().writer();
         var a: Args = .{ .args = try std.process.argsAlloc(allocator) };
+        for (a.args) |arg| { gprof.area_data[@intFromEnum(ProfArea.args)] += arg.len; }
         if (a.args.len < 3) {
             try stderr.writeAll(help);
             return error.NotEnoughArguments;
@@ -189,6 +190,11 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
     const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
+    gprof.area_data[@intFromEnum(ProfArea.json)]  += (try data_json_file.stat()).size;
+    gprof.area_data[@intFromEnum(ProfArea.json)]  += (try hsin_json_file.stat()).size;
+    gprof.area_data[@intFromEnum(ProfArea.float)] += (try data_f64_file.stat()).size;
+    gprof.area_data[@intFromEnum(ProfArea.calc)]  += gprof.area_data[@intFromEnum(ProfArea.float)];
+    gprof.area_data[@intFromEnum(ProfArea.float)] += (try hsin_f64_file.stat()).size;
     const bufsiz = 4096;
     const JsonBufType = prof.ProfiledBufferedReader(profEnabled, bufsiz, fs.File.Reader, ProfArea, .io_read_json);
     const bufdjr: JsonBufType = .{ .inner_reader = data_json_file.reader(), .profiler = &gprof, };

@@ -13,20 +13,22 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         };
     }
     return struct {
-        init_cycles:   u64  = 0,
-        init_os_time:  i128 = 0,
-        areas_sums:    [areas_count]u64 = [_]u64{0} ** areas_count,
-        areas_start:   [areas_count]u64 = [_]u64{0} ** areas_count,
-        areas_count:   [areas_count]u64 = [_]u64{0} ** areas_count,
+        init_cycles:  u64  = 0,
+        init_os_time: i128 = 0,
+        area_sum:     [area_count]u64 = [_]u64{0} ** area_count,
+        area_start:   [area_count]u64 = [_]u64{0} ** area_count,
+        area_count:   [area_count]u64 = [_]u64{0} ** area_count,
 
-        // TODO: measure throughput
+        /// Set amount of data processed (or to be processed) in given area to
+        /// calculate area throughput after calling sum() based on the area
+        /// time measurements.
+        area_data: [area_count]u64 = [_]usize{0} ** area_count,
 
         const Self = @This();
-        const areas_count = @typeInfo(AreasEnum).Enum.fields.len;
+        const area_count = @typeInfo(AreasEnum).Enum.fields.len;
         const AreaPercent = struct {
-            area:    AreasEnum,
+            area: AreasEnum,
             percent: f64,
-            cycles:  u64,
 
             pub fn lessThan(_: void, lhs: AreaPercent, rhs: AreaPercent) bool {
                 return lhs.percent > rhs.percent;
@@ -41,18 +43,17 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         pub fn sum(self: *Self, writer: anytype) !void {
             var buf = std.io.bufferedWriter(writer);
             const bufw = buf.writer();
-            var percents: [areas_count]AreaPercent = undefined;
+            var percents: [area_count]AreaPercent = undefined;
             const total_cycles: f64 = @floatFromInt(rdtsc() - self.init_cycles);
             const total_time = std.time.nanoTimestamp() - self.init_os_time;
             const total_ms = @as(f128, @floatFromInt(total_time))/@as(f128, @floatFromInt(std.time.ns_per_ms));
             const ms_per_cycle: f128 = total_cycles/total_ms;
-            for (self.areas_sums, 0..) |a, i| {
+            for (self.area_sum, 0..) |a, i| {
                 const f: f64 = @floatFromInt(a);
                 const p = (f*100.0)/total_cycles;
                 percents[i] = .{
                     .area = @enumFromInt(i),
                     .percent = p,
-                    .cycles = a,
                 };
             }
             std.mem.sort(AreaPercent, &percents, {}, AreaPercent.lessThan);
@@ -73,8 +74,18 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 break :result b[i+1..];
             };
             for (percents) |p| {
-                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}% [cycles: {d}] (aprox time: {d:.4}ms)\n",
-                    .{@tagName(p.area), p.percent, p.cycles, @as(f128, @floatFromInt(p.cycles))/ms_per_cycle});
+                const cycles = self.area_sum[@intFromEnum(p.area)];
+                const data = self.area_data[@intFromEnum(p.area)];
+                const ms: f128 = @as(f128, @floatFromInt(cycles))/ms_per_cycle;
+                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}% [cycles: {d}] (aprox time: {d:.4}ms)",
+                    .{@tagName(p.area), p.percent, cycles, ms});
+                if (data > 0) {
+                    const throughput: usize = @intFromFloat((@as(f128, @floatFromInt(data))/ms)*std.time.ms_per_s);
+                    try bufw.print("  {d:.2} at {d:.2}/s", .{
+                        std.fmt.fmtIntSizeBin(data),
+                        std.fmt.fmtIntSizeBin(throughput)});
+                }
+                try bufw.writeByte('\n');
             }
             try bufw.print("  ------------------------------------\n", .{});
             try bufw.print("  total cycles: {d}\n",         .{total_cycles});
@@ -85,21 +96,22 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
 
         pub inline fn start(self: *Self, area: AreasEnum) void {
             const i = @intFromEnum(area);
-            if (self.areas_start[i] == 0) {
-                self.areas_start[i] = rdtsc();
+            if (self.area_start[i] == 0) {
+                self.area_start[i] = rdtsc();
             }
-            self.areas_count[i] += 1;
+            self.area_count[i] += 1;
         }
 
         pub inline fn end(self: *Self, area: AreasEnum) void {
             const i = @intFromEnum(area);
-            std.debug.assert(self.areas_count[i] > 0);
-            self.areas_count[i] -= 1;
-            if (self.areas_count[i] == 0) {
-                self.areas_sums[i] += rdtsc() - self.areas_start[i];
-                self.areas_start[i] = 0;
+            std.debug.assert(self.area_count[i] > 0);
+            self.area_count[i] -= 1;
+            if (self.area_count[i] == 0) {
+                self.area_sum[i] += rdtsc() - self.area_start[i];
+                self.area_start[i] = 0;
             }
         }
+
     };
 }
 
