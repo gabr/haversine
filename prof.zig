@@ -5,6 +5,8 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     // if profiler is disabled return a dummy struct
     if (!enable) {
         return struct {
+            area_data: [area_count]u64 = [_]usize{0} ** area_count,
+            const area_count = @typeInfo(AreasEnum).Enum.fields.len;
             const Self = @This();
             pub inline fn init (self: *Self)                   void { _ = self; }
             pub inline fn sum  (self: *Self, writer: anytype) !void { _ = self; _ = writer; }
@@ -24,8 +26,8 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         /// time measurements.
         area_data: [area_count]u64 = [_]usize{0} ** area_count,
 
-        const Self = @This();
         const area_count = @typeInfo(AreasEnum).Enum.fields.len;
+        const Self = @This();
         const AreaPercent = struct {
             area: AreasEnum,
             percent: f64,
