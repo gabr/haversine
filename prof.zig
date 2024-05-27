@@ -199,7 +199,7 @@ pub fn ProfiledBufferedReader(
 }
 
 /// read CPU clocks
-inline fn rdtsc() u64 {
+pub inline fn rdtsc() u64 {
     // https://www.felixcloutier.com/x86/rdtsc
     // https://www.felixcloutier.com/x86/rdtscp
     return asm (
