@@ -1,8 +1,8 @@
 data/
 generate-data
-generate-data.o
 parse-data
-parse-data.o
+test-file-read
+*.o
 test.*
 callgrind.out.*
 perf.data*
