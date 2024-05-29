@@ -8,10 +8,11 @@ build() {
     [ -f $file.o ] && rm $file.o
     ( # use subshell to disable set -x after rm command
         set -x # show the executed command
-        zig build-exe -O ReleaseFast $file.zig
+        zig build-exe -fno-strip -O ReleaseFast $file.zig
         rm $file.o # don't need that
     )
 }
 
-build "generate-data"
-build "parse-data"
+build generate-data
+build parse-data
+build test-file-read

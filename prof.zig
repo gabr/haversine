@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const expect = std.testing.expect;
 
 pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
@@ -17,9 +18,18 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     return struct {
         init_cycles:  u64  = 0,
         init_os_time: i128 = 0,
-        area_sum:     [area_count]u64 = [_]u64{0} ** area_count,
-        area_start:   [area_count]u64 = [_]u64{0} ** area_count,
-        area_count:   [area_count]u64 = [_]u64{0} ** area_count,
+        area_count:       [area_count]u64 = [_]u64{0} ** area_count,
+        area_clock_start: [area_count]u64 = [_]u64{0} ** area_count,
+        area_clock_sum:   [area_count]u64 = [_]u64{0} ** area_count,
+        area_pagef_start: [area_count]u64 = [_]u64{0} ** area_count,
+        area_pagef_sum:   [area_count]u64 = [_]u64{0} ** area_count,
+        // for counting page faults
+        perf_event: linux.fd_t = -1,
+        perf_event_attr: linux.perf_event_attr = .{
+            .type = linux.PERF.TYPE.SOFTWARE,
+            .config = @intCast(@intFromEnum(linux.PERF.COUNT.SW.PAGE_FAULTS)),
+            .flags = .{ .exclude_kernel = true, },
+        },
 
         /// Set amount of data processed (or to be processed) in given area to
         /// calculate area throughput after calling sum() based on the area
@@ -31,15 +41,25 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         const AreaPercent = struct {
             area: AreasEnum,
             percent: f64,
-
             pub fn lessThan(_: void, lhs: AreaPercent, rhs: AreaPercent) bool {
                 return lhs.percent > rhs.percent;
             }
         };
 
-        pub fn init(self: *Self) void {
+        pub fn init(self: *Self) !void {
             self.init_cycles = rdtsc();
             self.init_os_time = std.time.nanoTimestamp();
+            // register system performance event
+            self.perf_event = try std.posix.perf_event_open(
+                &self.perf_event_attr,
+                 0, // PID - linux.getpid() - 0 is the current process
+                -1, // CPU - all cpus
+                -1, // gropu_fd
+                 0, // flags
+            );
+            // start counting page faults
+            _ = linux.ioctl(self.perf_event, linux.PERF.EVENT_IOC.RESET, 0);
+            _ = linux.ioctl(self.perf_event, linux.PERF.EVENT_IOC.ENABLE, 0);
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
@@ -50,7 +70,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             const total_time = std.time.nanoTimestamp() - self.init_os_time;
             const total_ms = @as(f128, @floatFromInt(total_time))/@as(f128, @floatFromInt(std.time.ns_per_ms));
             const ms_per_cycle: f128 = total_cycles/total_ms;
-            for (self.area_sum, 0..) |a, i| {
+            for (self.area_clock_sum, 0..) |a, i| {
                 const f: f64 = @floatFromInt(a);
                 const p = (f*100.0)/total_cycles;
                 percents[i] = .{
@@ -59,14 +79,13 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 };
             }
             std.mem.sort(AreaPercent, &percents, {}, AreaPercent.lessThan);
-            try bufw.print("profiler summary:\n", .{});
             // construct in compile time the length of the first enum label column
             const area_name_width = comptime result: {
                 var longest: usize = 0;
                 for (@typeInfo(AreasEnum).Enum.fields) |f| {
                     if (f.name.len > longest) longest = f.name.len;
                 }
-                longest += 2; // padding
+                //longest += 2; // padding
                 var b = [_]u8 {0} ** 255;
                 var i: usize = b.len-1;
                 while (longest > 0) {
@@ -75,12 +94,15 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 }
                 break :result b[i+1..];
             };
+            try bufw.print("profiler summary (percent, aprox time, <page faults>, [cpu cycles], throughput?):\n", .{});
             for (percents) |p| {
-                const cycles = self.area_sum[@intFromEnum(p.area)];
-                const data = self.area_data[@intFromEnum(p.area)];
+                const i = @intFromEnum(p.area);
+                const cycles = self.area_clock_sum[i];
+                const pagef = self.area_pagef_sum[i];
+                const data = self.area_data[i];
                 const ms: f128 = @as(f128, @floatFromInt(cycles))/ms_per_cycle;
-                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}% [cycles: {d}] (aprox time: {d:.4}ms)",
-                    .{@tagName(p.area), p.percent, cycles, ms});
+                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}%  {d:.4}ms  <{d}>  [{d}]",
+                    .{@tagName(p.area), p.percent, ms, pagef, cycles});
                 if (data > 0) {
                     const throughput: usize = @intFromFloat((@as(f128, @floatFromInt(data))/ms)*std.time.ms_per_s);
                     try bufw.print("  {d:.2} at {d:.2}/s", .{
@@ -98,8 +120,9 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
 
         pub inline fn start(self: *Self, area: AreasEnum) void {
             const i = @intFromEnum(area);
-            if (self.area_start[i] == 0) {
-                self.area_start[i] = rdtsc();
+            if (self.area_clock_start[i] == 0) {
+                self.area_clock_start[i] = rdtsc();
+                self.area_pagef_start[i] = self.read_pagef();
             }
             self.area_count[i] += 1;
         }
@@ -109,11 +132,18 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             std.debug.assert(self.area_count[i] > 0);
             self.area_count[i] -= 1;
             if (self.area_count[i] == 0) {
-                self.area_sum[i] += rdtsc() - self.area_start[i];
-                self.area_start[i] = 0;
+                self.area_clock_sum[i] += rdtsc() - self.area_clock_start[i];
+                self.area_pagef_sum[i] += self.read_pagef() - self.area_pagef_start[i];
+                self.area_clock_start[i] = 0;
             }
         }
 
+        inline fn read_pagef(self: *Self) u64 {
+            var res: u64 = 0;
+            const read_count = linux.read(self.perf_event, std.mem.asBytes(&res), @sizeOf(@TypeOf(res)));
+            if (read_count == std.math.maxInt(usize)) @panic("reading page faults count failed\n");
+            return res;
+        }
     };
 }
 

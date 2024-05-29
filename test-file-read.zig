@@ -18,7 +18,7 @@ const ProfArea = enum {
 var gprof: prof.Profiler(profEnabled, ProfArea) = .{};
 
 pub fn main() !void {
-    gprof.init();
+    try gprof.init();
     try testFile("data/big-data.json",   .big_json1);
     try testFile("data/big-data.json",   .big_json2);
     try testFile("data/three-data.json", .small_json1);

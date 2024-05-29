@@ -63,7 +63,7 @@ const ProfArea = enum { args, io_open, io_read_json, io_read_float, json, float,
 var gprof: prof.Profiler(profEnabled, ProfArea) = .{};
 
 pub fn main() !void {
-    gprof.init();
+    try gprof.init();
     gprof.start(.alloc);
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
