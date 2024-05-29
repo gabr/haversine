@@ -52,7 +52,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             // register system performance event
             self.perf_event = try std.posix.perf_event_open(
                 &self.perf_event_attr,
-                 0, // PID - linux.getpid() - 0 is the current process
+                 0, // PID - 0 is the current process
                 -1, // CPU - all cpus
                 -1, // gropu_fd
                  0, // flags
