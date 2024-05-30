@@ -1,5 +1,4 @@
-///usr/bin/env zig run -fno-error-tracing -freference-trace "$0" -- "$@"; exit
-// -fno-error-tracing  print only simple error message on error
+///usr/bin/env zig run -freference-trace "$0" -- "$@"; exit
 // A simple program to test file read bandwidth
 const std       = @import("std");
 const io        = std.io;

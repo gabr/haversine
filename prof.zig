@@ -1,6 +1,5 @@
-const std       = @import("std");
-const expect    = std.testing.expect;
-const pagefault = @import("page-fault.zig");
+const std        = @import("std");
+const expect     = std.testing.expect;
 
 pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     // if profiler is disabled return a dummy struct
@@ -18,12 +17,13 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     return struct {
         init_cycles:  u64  = 0,
         init_os_time: i128 = 0,
-        pagef_fd: std.os.linux.fd_t = -1,
-        area_count:       [area_count]u64 = [_]u64{0} ** area_count,
-        area_clock_start: [area_count]u64 = [_]u64{0} ** area_count,
-        area_clock_sum:   [area_count]u64 = [_]u64{0} ** area_count,
-        area_pagef_start: [area_count]u64 = [_]u64{0} ** area_count,
-        area_pagef_sum:   [area_count]u64 = [_]u64{0} ** area_count,
+        area_count:           [area_count]u64 = [_]u64{0} ** area_count,
+        area_clock_start:     [area_count]u64 = [_]u64{0} ** area_count,
+        area_clock_sum:       [area_count]u64 = [_]u64{0} ** area_count,
+        area_min_pagef_start: [area_count]isize = [_]isize{0} ** area_count,
+        area_min_pagef_sum:   [area_count]isize = [_]isize{0} ** area_count,
+        area_maj_pagef_start: [area_count]isize = [_]isize{0} ** area_count,
+        area_maj_pagef_sum:   [area_count]isize = [_]isize{0} ** area_count,
 
         /// Set amount of data processed (or to be processed) in given area to
         /// calculate area throughput after calling sum() based on the area
@@ -43,7 +43,6 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         pub fn init(self: *Self) !void {
             self.init_cycles = rdtsc();
             self.init_os_time = std.time.nanoTimestamp();
-            self.pagef_fd = try pagefault.init();
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
@@ -78,15 +77,16 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 }
                 break :result b[i+1..];
             };
-            try bufw.print("profiler summary (percent, aprox time, <page faults>, [cpu cycles], throughput?):\n", .{});
+            try bufw.print("profiler summary (percent, aprox time, <page faults: min, maj>, [cpu cycles], throughput?):\n", .{});
             for (percents) |p| {
                 const i = @intFromEnum(p.area);
                 const cycles = self.area_clock_sum[i];
-                const pagef = self.area_pagef_sum[i];
+                const min_pagef = self.area_min_pagef_sum[i];
+                const maj_pagef = self.area_maj_pagef_sum[i];
                 const data = self.area_data[i];
                 const ms: f128 = @as(f128, @floatFromInt(cycles))/ms_per_cycle;
-                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}%  {d:.4}ms  <{d}>  [{d}]",
-                    .{@tagName(p.area), p.percent, ms, pagef, cycles});
+                try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}%  {d:.4}ms  <{d}, {d}>  [{d}]",
+                    .{@tagName(p.area), p.percent, ms, min_pagef, maj_pagef, cycles});
                 if (data > 0) {
                     const throughput: usize = @intFromFloat((@as(f128, @floatFromInt(data))/ms)*std.time.ms_per_s);
                     try bufw.print("  {d:.2} at {d:.2}/s", .{
@@ -106,7 +106,9 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             const i = @intFromEnum(area);
             if (self.area_clock_start[i] == 0) {
                 self.area_clock_start[i] = rdtsc();
-                self.area_pagef_start[i] = pagefault.read(self.pagef_fd);
+                const rusage = std.posix.getrusage(0);
+                self.area_min_pagef_start[i] = rusage.minflt;
+                self.area_maj_pagef_start[i] = rusage.majflt;
             }
             self.area_count[i] += 1;
         }
@@ -117,7 +119,9 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             self.area_count[i] -= 1;
             if (self.area_count[i] == 0) {
                 self.area_clock_sum[i] += rdtsc() - self.area_clock_start[i];
-                self.area_pagef_sum[i] += pagefault.read(self.pagef_fd) - self.area_pagef_start[i];
+                const rusage = std.posix.getrusage(0);
+                self.area_min_pagef_sum[i] += rusage.minflt - self.area_min_pagef_start[i];
+                self.area_maj_pagef_sum[i] += rusage.majflt - self.area_maj_pagef_start[i];
                 self.area_clock_start[i] = 0;
             }
         }

@@ -1,7 +1,9 @@
-/// This code allows you to measure page faults.
-/// It will require the elevated privileges tho (aka. sudo).
+/// This code allows you to measure page faults BUT REQUIRES SUDO!
+/// To get page faults without sudo call: std.posix.getrusage(0)
 const std = @import("std");
 const linux = std.os.linux;
+
+// https://stackoverflow.com/a/23308694
 
 const err = std.math.maxInt(usize);
 var perf_event_attr: linux.perf_event_attr = .{
@@ -28,6 +30,6 @@ pub fn init() !linux.fd_t {
 pub inline fn read(fd: linux.fd_t) u64 {
     var res: u64 = 0;
     const read_count = linux.read(fd, std.mem.asBytes(&res), @sizeOf(@TypeOf(res)));
-    if (read_count == err) @panic("reading page faults count failed\n");
+    if (read_count == err) @panic("reading page faults count failed");
     return res;
 }

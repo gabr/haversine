@@ -2,6 +2,7 @@ data/
 generate-data
 parse-data
 test-file-read
+test-page-fault
 *.o
 test.*
 callgrind.out.*
