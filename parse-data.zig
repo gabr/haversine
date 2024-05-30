@@ -51,11 +51,11 @@ const help =
 
 const std       = @import("std");
 const io        = std.io;
-const dstderr   = std.debug.print;
+const debugp    = std.debug.print;
 const fs        = std.fs;
 const assert    = std.debug.assert;
 const mem       = std.mem;
-const haversine = @import("common.zig").haversine;
+const haversine = @import("haversine.zig").haversine;
 const prof      = @import("prof.zig");
 
 const profEnabled = true;
@@ -72,7 +72,7 @@ pub fn main() !void {
     // need to free the memory in this short living program.
     // Same will go for all the allocations that will follow.
     const args = try Args.get(allocator);
-    if (profEnabled) dstderr("profiler enabled\n", .{});
+    if (profEnabled) debugp("profiler enabled\n", .{});
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
@@ -189,7 +189,7 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     const hsin_json_file = try openFile(allocator, args, "hsin.json"); defer hsin_json_file.close();
     const data_f64_file  = try openFile(allocator, args, "data.f64");  defer data_f64_file .close();
     const hsin_f64_file  = try openFile(allocator, args, "hsin.f64");  defer hsin_f64_file .close();
-    const validate = args.valid; if (validate) dstderr("validation enabled\n", .{});
+    const validate = args.valid; if (validate) debugp("validation enabled\n", .{});
     gprof.area_data[@intFromEnum(ProfArea.json)]  += (try data_json_file.stat()).size;
     gprof.area_data[@intFromEnum(ProfArea.json)]  += (try hsin_json_file.stat()).size;
     gprof.area_data[@intFromEnum(ProfArea.float)] += (try data_f64_file.stat()).size;
@@ -210,10 +210,10 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
     var count: u32 = 0;
     while (true) {
         djr.nextObject() catch |err| switch (err) { error.EndOfStream => break, else => return err, };
-        _ = try djr.nextKey(); const x0 = try djr.nextNum(); const x0pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{x0pos, x0});
-        _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{y0pos, y0});
-        _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); //dstderr("[{d}]: {d}, ", .{x1pos, x1});
-        _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); //dstderr("[{d}]: {d}\n", .{y1pos, y1});
+        _ = try djr.nextKey(); const x0 = try djr.nextNum(); const x0pos = djr.getPos(); //debugp("[{d}]: {d}, ", .{x0pos, x0});
+        _ = try djr.nextKey(); const y0 = try djr.nextNum(); const y0pos = djr.getPos(); //debugp("[{d}]: {d}, ", .{y0pos, y0});
+        _ = try djr.nextKey(); const x1 = try djr.nextNum(); const x1pos = djr.getPos(); //debugp("[{d}]: {d}, ", .{x1pos, x1});
+        _ = try djr.nextKey(); const y1 = try djr.nextNum(); const y1pos = djr.getPos(); //debugp("[{d}]: {d}\n", .{y1pos, y1});
         gprof.start(.calc);
         const hsin = haversine(x0, y0, x1, y1);
         hsum += hsin;
@@ -221,13 +221,13 @@ fn parseAndCalculate(allocator: mem.Allocator, args: Args) !f64 {
         count += 1;
         if (validate) {
             const err1 = "error: incorrect float at {d} byte, expected: {d}, got: {d}\n";
-            const fx0 = try nextFloat(dfr); if (fx0 != x0) dstderr(err1, .{x0pos, fx0, x0});
-            const fy0 = try nextFloat(dfr); if (fy0 != y0) dstderr(err1, .{y0pos, fy0, y0});
-            const fx1 = try nextFloat(dfr); if (fx1 != x1) dstderr(err1, .{x1pos, fx1, x1});
-            const fy1 = try nextFloat(dfr); if (fy1 != y1) dstderr(err1, .{y1pos, fy1, y1});
+            const fx0 = try nextFloat(dfr); if (fx0 != x0) debugp(err1, .{x0pos, fx0, x0});
+            const fy0 = try nextFloat(dfr); if (fy0 != y0) debugp(err1, .{y0pos, fy0, y0});
+            const fx1 = try nextFloat(dfr); if (fx1 != x1) debugp(err1, .{x1pos, fx1, x1});
+            const fy1 = try nextFloat(dfr); if (fy1 != y1) debugp(err1, .{y1pos, fy1, y1});
             const err2 = "error: incorrect Haversine distance for pairs: [{d}; {d}] [{d}; {d}] (at {d} byte), expected: {d}, got: {d}\n";
-            const hsinj = try hjr.nextNum();  if (hsinj != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinj, hsin });
-            const hsinf = try nextFloat(hfr); if (hsinf != hsin) dstderr(err2, .{ x0, y0, x1, y1, x0pos, hsinf, hsin });
+            const hsinj = try hjr.nextNum();  if (hsinj != hsin) debugp(err2, .{ x0, y0, x1, y1, x0pos, hsinj, hsin });
+            const hsinf = try nextFloat(hfr); if (hsinf != hsin) debugp(err2, .{ x0, y0, x1, y1, x0pos, hsinf, hsin });
         }
     }
     gprof.start(.calc);
@@ -242,7 +242,7 @@ fn openFile( allocator: mem.Allocator, args: Args, suf: []const u8) !fs.File {
     const file_path = try fs.path.join(allocator, &[_][]const u8{ args.path, file_name });
     return fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
         error.FileNotFound => {
-            dstderr("file '{s}' not found\n", .{file_path});
+            debugp("file '{s}' not found\n", .{file_path});
             return err;
         },
         else => return err,

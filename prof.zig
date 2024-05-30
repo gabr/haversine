@@ -1,6 +1,6 @@
-const std = @import("std");
-const linux = std.os.linux;
-const expect = std.testing.expect;
+const std       = @import("std");
+const expect    = std.testing.expect;
+const pagefault = @import("page-fault.zig");
 
 pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     // if profiler is disabled return a dummy struct
@@ -18,18 +18,12 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
     return struct {
         init_cycles:  u64  = 0,
         init_os_time: i128 = 0,
+        pagef_fd: std.os.linux.fd_t = -1,
         area_count:       [area_count]u64 = [_]u64{0} ** area_count,
         area_clock_start: [area_count]u64 = [_]u64{0} ** area_count,
         area_clock_sum:   [area_count]u64 = [_]u64{0} ** area_count,
         area_pagef_start: [area_count]u64 = [_]u64{0} ** area_count,
         area_pagef_sum:   [area_count]u64 = [_]u64{0} ** area_count,
-        // for counting page faults
-        perf_event: linux.fd_t = -1,
-        perf_event_attr: linux.perf_event_attr = .{
-            .type = linux.PERF.TYPE.SOFTWARE,
-            .config = @intCast(@intFromEnum(linux.PERF.COUNT.SW.PAGE_FAULTS)),
-            .flags = .{ .exclude_kernel = true, },
-        },
 
         /// Set amount of data processed (or to be processed) in given area to
         /// calculate area throughput after calling sum() based on the area
@@ -49,17 +43,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         pub fn init(self: *Self) !void {
             self.init_cycles = rdtsc();
             self.init_os_time = std.time.nanoTimestamp();
-            // register system performance event
-            self.perf_event = try std.posix.perf_event_open(
-                &self.perf_event_attr,
-                 0, // PID - 0 is the current process
-                -1, // CPU - all cpus
-                -1, // gropu_fd
-                 0, // flags
-            );
-            // start counting page faults
-            _ = linux.ioctl(self.perf_event, linux.PERF.EVENT_IOC.RESET, 0);
-            _ = linux.ioctl(self.perf_event, linux.PERF.EVENT_IOC.ENABLE, 0);
+            self.pagef_fd = try pagefault.init();
         }
 
         pub fn sum(self: *Self, writer: anytype) !void {
@@ -122,7 +106,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             const i = @intFromEnum(area);
             if (self.area_clock_start[i] == 0) {
                 self.area_clock_start[i] = rdtsc();
-                self.area_pagef_start[i] = self.read_pagef();
+                self.area_pagef_start[i] = pagefault.read(self.pagef_fd);
             }
             self.area_count[i] += 1;
         }
@@ -133,16 +117,9 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             self.area_count[i] -= 1;
             if (self.area_count[i] == 0) {
                 self.area_clock_sum[i] += rdtsc() - self.area_clock_start[i];
-                self.area_pagef_sum[i] += self.read_pagef() - self.area_pagef_start[i];
+                self.area_pagef_sum[i] += pagefault.read(self.pagef_fd) - self.area_pagef_start[i];
                 self.area_clock_start[i] = 0;
             }
-        }
-
-        inline fn read_pagef(self: *Self) u64 {
-            var res: u64 = 0;
-            const read_count = linux.read(self.perf_event, std.mem.asBytes(&res), @sizeOf(@TypeOf(res)));
-            if (read_count == std.math.maxInt(usize)) @panic("reading page faults count failed\n");
-            return res;
         }
     };
 }

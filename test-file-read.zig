@@ -3,7 +3,7 @@
 // A simple program to test file read bandwidth
 const std       = @import("std");
 const io        = std.io;
-const dstderr   = std.debug.print;
+const debugp    = std.debug.print;
 const fs        = std.fs;
 const assert    = std.debug.assert;
 const prof      = @import("prof.zig");

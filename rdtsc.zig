@@ -1,13 +1,13 @@
 ///usr/bin/env zig run -freference-trace "$0" -- "$@"; exit
 // Exploratory program for figuring out how to call rdtsc cpu instruction.
 
-const std     = @import("std");
-const dstderr = std.debug.print;
+const std    = @import("std");
+const debugp = std.debug.print;
 
 pub fn main() !void {
-    dstderr("{d}\n", .{rdtsc()});
+    debugp("{d}\n", .{rdtsc()});
 
-    dstderr("os freq: {d}\n", .{std.time.ns_per_s});
+    debugp("os freq: {d}\n", .{std.time.ns_per_s});
     const mul: i128 = 5;
     const cpus = rdtsc();
     const ts = std.time.nanoTimestamp();
@@ -20,9 +20,9 @@ pub fn main() !void {
     const cpue = rdtsc();
     const cpud = cpue - cpus;
     const cpumhz = (@as(f128, @floatFromInt(cpud))/1048576.0)/mul;
-    dstderr("os timer: {d} -> {d} = {d} elapsed\n", .{ts, te, td});
-    dstderr("os seconds: {d}\n", .{@as(f128, @floatFromInt(td))/@as(f128, @floatFromInt(std.time.ns_per_s*mul))});
-    dstderr("cpu timer: {d} -> {d} = {d}MHz elapsed\n", .{cpus, cpue, cpumhz});
+    debugp("os timer: {d} -> {d} = {d} elapsed\n", .{ts, te, td});
+    debugp("os seconds: {d}\n", .{@as(f128, @floatFromInt(td))/@as(f128, @floatFromInt(std.time.ns_per_s*mul))});
+    debugp("cpu timer: {d} -> {d} = {d}MHz elapsed\n", .{cpus, cpue, cpumhz});
 }
 
 /// read CPU clocks

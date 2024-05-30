@@ -36,11 +36,11 @@ const help =
 ;
 
 const std       = @import("std");
-const dstderr   = std.debug.print;
+const debugp    = std.debug.print;
 const fs        = std.fs;
 const assert    = std.debug.assert;
 const mem       = std.mem;
-const haversine = @import("common.zig").haversine;
+const haversine = @import("haversine.zig").haversine;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -52,7 +52,7 @@ pub fn main() !void {
     var out: Output = undefined;
     try out.init(allocator, args);
     // doing it like that to at least try to flush the data out in case of any error
-    defer out.deinit() catch |err| dstderr("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
+    defer out.deinit() catch |err| debugp("failed to deinit output files\nerror: {s}\n", .{@errorName(err)});
     try generate(allocator, args, &out);
 }
 
@@ -71,7 +71,7 @@ const Args = struct {
         if (a.args.len < 4) { try stderr.writeAll(help); return error.NotEnoughArguments; }
         a.out = a.args[1];
         a.name = mem.trim(u8, a.args[2], " \t\n\r "); // the last one is hard space
-        if (a.name.len == 0) { dstderr("empty name\n", .{}); return error.IncorrectArgument; }
+        if (a.name.len == 0) { debugp("empty name\n", .{}); return error.IncorrectArgument; }
         a.count = try parseInt(u32, a.args[3]);
         a.seed = if (a.args.len > 4) try parseInt(u64, a.args[4]) else 0x0123456789abcdef;
         return a;
@@ -79,7 +79,7 @@ const Args = struct {
 
     fn parseInt(T: type, val: []const u8) !T {
         return std.fmt.parseInt(T, val, 10) catch |err| {
-            dstderr("value: '{s}' failed to parse as a positive integer\n", .{val});
+            debugp("value: '{s}' failed to parse as a positive integer\n", .{val});
             return err;
         };
     }
@@ -104,7 +104,7 @@ const Output = struct {
 
     pub fn init(self: *Output, allocator: mem.Allocator, args: Args) !void {
         self.dir = fs.cwd().openDir(args.out, .{}) catch |err| {
-            dstderr("cannot open output path '{s}'\n", .{args.out});
+            debugp("cannot open output path '{s}'\n", .{args.out});
             return err;
         };
         for (0..count) |i| {
@@ -147,7 +147,7 @@ const Output = struct {
 
     /// Puts message both into info.txt file and stderr
     pub fn info(self: *Output, comptime fmt: []const u8, args: anytype) !void {
-        dstderr(fmt, args);
+        debugp(fmt, args);
         try self.writer[@intFromEnum(File.info_txt)].print(fmt, args);
     }
 
@@ -174,7 +174,7 @@ const Output = struct {
         const path = try mem.join(allocator, "-", &[_][]const u8{ name, suf });
         // the .exclusive = true is so we faile if the file already exist
         return outdir.createFile(path, .{ .exclusive = true }) catch |err| {
-            dstderr("failed to create file: '{s}'\n", .{path});
+            debugp("failed to create file: '{s}'\n", .{path});
             return err;
         };
     }
