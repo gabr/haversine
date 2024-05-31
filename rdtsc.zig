@@ -19,7 +19,8 @@ pub fn main() !void {
     }
     const cpue = rdtsc();
     const cpud = cpue - cpus;
-    const cpumhz = (@as(f128, @floatFromInt(cpud))/1048576.0)/mul;
+    const mib = std.math.pow(f64, 10,6);
+    const cpumhz = (@as(f128, @floatFromInt(cpud))/mib)/mul;
     debugp("os timer: {d} -> {d} = {d} elapsed\n", .{ts, te, td});
     debugp("os seconds: {d}\n", .{@as(f128, @floatFromInt(td))/@as(f128, @floatFromInt(std.time.ns_per_s*mul))});
     debugp("cpu timer: {d} -> {d} = {d}MHz elapsed\n", .{cpus, cpue, cpumhz});

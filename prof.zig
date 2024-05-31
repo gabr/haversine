@@ -52,7 +52,8 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             const total_cycles: f64 = @floatFromInt(rdtsc() - self.init_cycles);
             const total_time = std.time.nanoTimestamp() - self.init_os_time;
             const total_ms = @as(f128, @floatFromInt(total_time))/@as(f128, @floatFromInt(std.time.ns_per_ms));
-            const ms_per_cycle: f128 = total_cycles/total_ms;
+            const cycles_per_s = total_cycles/(total_ms/std.time.ms_per_s);
+            const ms_per_cycle: f128 = total_ms/total_cycles;
             for (self.area_clock_sum, 0..) |a, i| {
                 const f: f64 = @floatFromInt(a);
                 const p = (f*100.0)/total_cycles;
@@ -77,26 +78,30 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 }
                 break :result b[i+1..];
             };
-            try bufw.print("profiler summary (percent, aprox time, <page faults: min, maj>, [cpu cycles], throughput?):\n", .{});
+            try bufw.writeAll("profiler summary:\n");
+            try bufw.writeAll("  area, percent, aprox time, <page faults: min, maj>, [cpu cycles], ?(amount at speed with cycles/byte)\n");
             for (percents) |p| {
                 const i = @intFromEnum(p.area);
                 const cycles = self.area_clock_sum[i];
+                const fcycles: f128 = @floatFromInt(cycles);
                 const min_pagef = self.area_min_pagef_sum[i];
                 const maj_pagef = self.area_maj_pagef_sum[i];
                 const data = self.area_data[i];
-                const ms: f128 = @as(f128, @floatFromInt(cycles))/ms_per_cycle;
+                const ms: f128 = fcycles*ms_per_cycle;
                 try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}%  {d:.4}ms  <{d}, {d}>  [{d}]",
                     .{@tagName(p.area), p.percent, ms, min_pagef, maj_pagef, cycles});
                 if (data > 0) {
-                    const throughput: usize = @intFromFloat((@as(f128, @floatFromInt(data))/ms)*std.time.ms_per_s);
-                    try bufw.print("  {d:.2} at {d:.2}/s", .{
+                    const fdata: f128 = @floatFromInt(data);
+                    const throughput: usize = @intFromFloat((fdata/ms)*std.time.ms_per_s);
+                    try bufw.print("  ({d:.2} at {d:.2}/s  {d:.2}c/b)", .{
                         std.fmt.fmtIntSizeBin(data),
-                        std.fmt.fmtIntSizeBin(throughput)});
+                        std.fmt.fmtIntSizeBin(throughput),
+                        fcycles/fdata});
                 }
                 try bufw.writeByte('\n');
             }
             try bufw.print("  ------------------------------------\n", .{});
-            try bufw.print("  total cycles: {d}\n",         .{total_cycles});
+            try bufw.print("  total cycles: {d} ({d:.4}MHz)\n", .{total_cycles, cycles_per_s/std.math.pow(f64,10,6)});
             try bufw.print("  total wall time: {d:.4}ms ({d:.2}s)\n", .{total_ms, total_ms/std.time.ms_per_s});
             try bufw.print("  ------------------------------------\n", .{});
             try buf.flush();
