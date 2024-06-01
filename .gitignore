@@ -3,6 +3,7 @@ generate-data
 parse-data
 test-file-read
 test-page-fault
+test-asm
 *.o
 test.*
 callgrind.out.*
