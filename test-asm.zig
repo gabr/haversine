@@ -1,4 +1,4 @@
-///usr/bin/env nasm -f elf64 test-asm.asm -o asm.o && zig build-exe -fPIC -freference-trace asm.o "$0" && rm ${0:0:-4}.o && ./${0:0:-4} "$@"; exit
+///usr/bin/env nasm -f elf64 ${0:0:-4}.asm -o asm.o && zig build-exe -fPIC -freference-trace asm.o "$0" && rm ${0:0:-4}.o && ./${0:0:-4} "$@"; exit
 const std    = @import("std");
 const debugp = std.debug.print;
 

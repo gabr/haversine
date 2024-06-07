@@ -26,7 +26,7 @@ pub fn main() !void {
     try testFile("data/big-data.f64",    .big_float2);
     try testFile("data/three-data.f64",  .small_float1);
     try testFile("data/three-data.f64",  .small_float2);
-    try gprof.sum(io.getStdErr().writer());
+    try gprof.sum(io.getStdErr().writer(), true);
 }
 
 pub fn testFile(path: []const u8, comptime area: ProfArea) !void {

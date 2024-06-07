@@ -76,7 +76,7 @@ pub fn main() !void {
     const result = try parseAndCalculate(allocator, args);
     const stdout = io.getStdOut().writer();
     try stdout.print("{d}\n", .{result});
-    try gprof.sum(io.getStdErr().writer());
+    try gprof.sum(io.getStdErr().writer(), true);
 }
 
 const Args = struct {

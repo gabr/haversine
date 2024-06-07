@@ -4,6 +4,8 @@ parse-data
 test-file-read
 test-page-fault
 test-asm
+test-load-store
+test-simd
 *.o
 test.*
 callgrind.out.*

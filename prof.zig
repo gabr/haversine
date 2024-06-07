@@ -45,7 +45,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             self.init_os_time = std.time.nanoTimestamp();
         }
 
-        pub fn sum(self: *Self, writer: anytype) !void {
+        pub fn sum(self: *Self, writer: anytype, sort: bool) !void {
             var buf = std.io.bufferedWriter(writer);
             const bufw = buf.writer();
             var percents: [area_count]AreaPercent = undefined;
@@ -62,7 +62,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                     .percent = p,
                 };
             }
-            std.mem.sort(AreaPercent, &percents, {}, AreaPercent.lessThan);
+            if (sort) std.mem.sort(AreaPercent, &percents, {}, AreaPercent.lessThan);
             // construct in compile time the length of the first enum label column
             const area_name_width = comptime result: {
                 var longest: usize = 0;
@@ -90,7 +90,7 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
                 const ms: f128 = fcycles*ms_per_cycle;
                 try bufw.print("  {s: <" ++ area_name_width ++ "} {d: >8.4}%  {d:.4}ms  <{d}, {d}>  [{d}]",
                     .{@tagName(p.area), p.percent, ms, min_pagef, maj_pagef, cycles});
-                if (data > 0) {
+                if (cycles > 0 and data > 0) {
                     const fdata: f128 = @floatFromInt(data);
                     const throughput: usize = @intFromFloat((fdata/ms)*std.time.ms_per_s);
                     try bufw.print("  ({d:.2} at {d:.2}/s  {d:.2}c/b)", .{
