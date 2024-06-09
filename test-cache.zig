@@ -3,18 +3,16 @@ const std    = @import("std");
 const debugp = std.debug.print;
 const prof   = @import("prof.zig");
 
+// generate 64 enums
 const ProfArea = result: {
     var decls = [_]std.builtin.Type.Declaration{};
-    const nametemp = "b00\x00";
-    var namesbuf: [(nametemp.len)*64]u8 = undefined;
     var fields: [64]std.builtin.Type.EnumField = undefined;
-    for (0..fields.len) |f| {
-        var name = namesbuf[f*nametemp.len..(f*nametemp.len)+nametemp.len];
-        for (name, 0..) |*c,i| { c.* = nametemp[i]; }
+    for (1..fields.len+1) |f| {
         var d = f;
+        var name: [4]u8 = .{ 'b', '0', '0', 0 };
         name[2] = @as(u8,'0') + @rem(d,10); d = @divTrunc(d,10);
         if (d>0) name[1] = @as(u8,'0') + @rem(d,10);
-        fields[f] = .{ .name = @ptrCast(name), .value = f, };
+        fields[f-1] = .{ .name = @ptrCast(&name), .value = f-1, };
     }
     break :result @Type(.{
         .Enum = .{
@@ -42,7 +40,7 @@ pub fn main() !void {
     inline for (@typeInfo(ProfArea).Enum.fields) |f| {
         const area: ProfArea = @enumFromInt(f.value);
         debugp("{s} start ...", .{f.name});
-        if (mask == 0) mask = 0x1 else mask = (mask << 1) | 0x1;
+        mask = (mask << 1) | 0x1;
         debugp("{d}", .{mask});
         gprof.start(area);
         cacheTest(n, data.ptr, mask);
