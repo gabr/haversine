@@ -6,6 +6,7 @@ test-page-fault
 test-asm
 test-load-store
 test-simd
+test-cache
 *.o
 test.*
 callgrind.out.*
