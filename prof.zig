@@ -8,10 +8,10 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
             area_data: [area_count]u64 = [_]usize{0} ** area_count,
             const area_count = @typeInfo(AreasEnum).Enum.fields.len;
             const Self = @This();
-            pub inline fn init (self: *Self)                   void { _ = self; }
-            pub inline fn sum  (self: *Self, writer: anytype) !void { _ = self; _ = writer; }
-            pub inline fn start(self: *Self, area: AreasEnum)  void { _ = self; _ = area;   }
-            pub inline fn end  (self: *Self, area: AreasEnum)  void { _ = self; _ = area;   }
+            pub inline fn init (self: *Self)                              !void { _ = self; }
+            pub inline fn sum  (self: *Self, writer: anytype, sort: bool) !void { _ = self; _ = writer; _ = sort; }
+            pub inline fn start(self: *Self, area: AreasEnum)              void { _ = self; _ = area;   }
+            pub inline fn end  (self: *Self, area: AreasEnum)              void { _ = self; _ = area;   }
         };
     }
     return struct {

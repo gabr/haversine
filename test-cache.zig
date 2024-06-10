@@ -34,6 +34,7 @@ extern "asm" fn cacheTest1(n: u64, data: [*]u8, mask: u64) void;
 extern "asm" fn cacheTest2(n: u64, data: [*]u8, mask: u64) void;
 extern "asm" fn cacheTest3(n: u64, data: [*]u8, mask: u64) void;
 extern "asm" fn cacheTest4(n: u64, data: [*]u8, mask: u64) void;
+extern "asm" fn cacheTest5(n: u64, data: [*]u8, mask: u64) void;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -44,6 +45,7 @@ pub fn main() !void {
     try testFn("cacheTest2", data, cacheTest2);
     try testFn("cacheTest3", data, cacheTest3);
     try testFn("cacheTest4", data, cacheTest4);
+    try testFn("cacheTest5", data, cacheTest5);
 }
 
 fn testFn(name: []const u8, data: []u8, func: CacheTestFn) !void {

@@ -2,6 +2,7 @@ global cacheTest1
 global cacheTest2
 global cacheTest3
 global cacheTest4
+global cacheTest5
 
 section .text
 
@@ -70,6 +71,27 @@ cacheTest4:
     add rax, 64
     and rax, rdx
     sub rdi, 128
+    jnle .loop
+    ret
+
+; rdi - n - how much bytes to read
+; rsi - data base pointer
+; rdx - mask over data offset
+cacheTest5:
+    xor rax, rax ; data offset
+	align 64
+.loop:
+    vmovdqu ymm0, [rsi+rax]
+    vmovdqu ymm0, [rsi+rax+32]
+    vmovdqu ymm0, [rsi+rax+64]
+    vmovdqu ymm0, [rsi+rax+128]
+    vmovdqu ymm0, [rsi+rax+160]
+    vmovdqu ymm0, [rsi+rax+192]
+    vmovdqu ymm0, [rsi+rax+234]
+    vmovdqu ymm0, [rsi+rax+256]
+    add rax, 256
+    and rax, rdx
+    sub rdi, 256
     jnle .loop
     ret
 
