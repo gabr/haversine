@@ -43,6 +43,15 @@ pub fn Profiler(comptime enable: bool, comptime AreasEnum: type) type {
         pub fn init(self: *Self) !void {
             self.init_cycles = rdtsc();
             self.init_os_time = std.time.nanoTimestamp();
+            for (0..area_count) |i| {
+                self.area_clock_start[i]     = 0;
+                self.area_clock_sum[i]       = 0;
+                self.area_min_pagef_start[i] = 0;
+                self.area_min_pagef_sum[i]   = 0;
+                self.area_maj_pagef_start[i] = 0;
+                self.area_maj_pagef_sum[i]   = 0;
+                self.area_data[i]            = 0;
+            }
         }
 
         pub fn sum(self: *Self, writer: anytype, sort: bool) !void {

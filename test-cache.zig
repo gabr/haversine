@@ -4,9 +4,10 @@ const debugp = std.debug.print;
 const prof   = @import("prof.zig");
 
 // generate 64 enums
+const enums_count = 64;
 const ProfArea = result: {
     var decls = [_]std.builtin.Type.Declaration{};
-    var fields: [64]std.builtin.Type.EnumField = undefined;
+    var fields: [enums_count]std.builtin.Type.EnumField = undefined;
     for (1..fields.len+1) |f| {
         var d = f;
         var name: [4]u8 = .{ 'b', '0', '0', 0 };
@@ -26,26 +27,36 @@ const ProfArea = result: {
 const profEnabled = true;
 var gprof: prof.Profiler(profEnabled, ProfArea) = .{};
 
-extern "asm" fn cacheTest(n: u64, data: [*]u8, mask: u64) void;
+const CacheTestFn = fn (n: u64, data: [*]u8, mask: u64) callconv(.C) void;
+extern "asm" fn cacheTest1(n: u64, data: [*]u8, mask: u64) void;
+extern "asm" fn cacheTest2(n: u64, data: [*]u8, mask: u64) void;
+extern "asm" fn cacheTest3(n: u64, data: [*]u8, mask: u64) void;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     const data = try allocator.alloc(u8, (1024*1024*1024));
-    const n: u64 = @intCast(data.len);
-    var mask: u64 = 0;
     for (data) |*d| { d.* = 1; } // toch all the data and set to something different than 0
-    inline for (@typeInfo(ProfArea).Enum.fields) |f| { gprof.area_data[f.value] += n; }
+    try testFn("cacheTest1", data, cacheTest1);
+    try testFn("cacheTest2", data, cacheTest2);
+    try testFn("cacheTest3", data, cacheTest2);
+}
+
+fn testFn(name: []const u8, data: []u8, func: CacheTestFn) !void {
+    var mask: u64 = 0;
+    const n: u64 = @intCast(data.len);
+    debugp("testing: {s}\n", .{name});
     try gprof.init();
     inline for (@typeInfo(ProfArea).Enum.fields) |f| {
+        gprof.area_data[f.value] += n;
         const area: ProfArea = @enumFromInt(f.value);
-        debugp("{s} start ...", .{f.name});
+        //debugp("{s} start ...", .{f.name});
         mask = (mask << 1) | 0x1;
-        debugp("{d}", .{mask});
+        //debugp("{d}", .{mask});
         gprof.start(area);
-        cacheTest(n, data.ptr, mask);
+        func(n, data.ptr, mask);
         gprof.end(area);
-        debugp(" end\n", .{});
+        //debugp(" end\n", .{});
     }
     try gprof.sum(std.io.getStdErr().writer(), false);
 }
